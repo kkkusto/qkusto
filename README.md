@@ -1,14 +1,16 @@
 import pandas as pd
 
-# Load the two CSV files
-df1 = pd.read_csv("file1.csv")
-df2 = pd.read_csv("file2.csv")
+# Load the CSV file
+df = pd.read_csv("file.csv")
 
-# Merge the dataframes on two columns (e.g., 'ColumnA' and 'ColumnB')
-merged_df = df1.merge(df2, on=['ColumnA', 'ColumnB'], how='inner')  # Change 'inner' to 'left', 'right', or 'outer' if needed
+# Split 'ColumnA' by '.' and create new columns 'A' and 'B'
+df[['A', 'B']] = df['ColumnA'].astype(str).str.split('.', expand=True)
 
-# Save the merged dataframe to a new CSV file
-merged_df.to_csv("merged_output.csv", index=False)
+# Convert the entire DataFrame to uppercase and trim spaces
+df = df.applymap(lambda x: x.strip().upper() if isinstance(x, str) else x)
 
-# Display the first few rows of the merged dataframe
-print(merged_df.head())
+# Save the modified dataframe
+df.to_csv("output.csv", index=False)
+
+# Display the first few rows
+print(df.head())
