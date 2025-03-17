@@ -1,42 +1,31 @@
 import os
 import pandas as pd
 
-def process_folder(folder_path):
+def process_folder(folder_path, reference_csv):
+    # Load reference CSV
+    ref_df = pd.read_csv(reference_csv)
+    
     for filename in os.listdir(folder_path):
-        if filename.endswith('.txt'):
-            file_path = os.path.join(folder_path, filename)
-            temp_lines = []
-            unique_entries = set()
-            temp_file_path = os.path.join(folder_path, filename.replace('.txt', '_temp.txt'))
+        if filename.endswith('_temp.csv'):
+            csv_path = os.path.join(folder_path, filename)
+            base_name = filename.replace('_temp.csv', '')
             
-            with open(file_path, 'r', encoding='utf-8') as file, open(temp_file_path, 'w', encoding='utf-8') as temp_file:
-                for line in file:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    if '/' in line and ':' in line:
-                        temp_file.write(line + '\n')
-                        try:
-                            parts = line.split(':', 1)
-                            if len(parts) < 2:
-                                continue
-                            
-                            first_word = parts[0].split()[0]  # Extract the first word
-                            split_first_word = first_word.split('/')  # Split by '/'
-                            
-                            unique_entries.add((first_word, ','.join(split_first_word)))
-                        except Exception:
-                            continue
+            # Load temp CSV
+            temp_df = pd.read_csv(csv_path)
             
-            # Convert set to DataFrame
-            df = pd.DataFrame(unique_entries, columns=['First_Word', 'Split_Word'])
+            # Find matching rows in reference CSV
+            matching_rows = ref_df[ref_df['table_name'] == base_name]
             
-            # Remove duplicates and save CSV
-            df.drop_duplicates(inplace=True)
-            csv_file_path = os.path.join(folder_path, filename.replace('.txt', '_temp.csv'))
-            df.to_csv(csv_file_path, index=False)
+            if not matching_rows.empty:
+                # Add original_ids column
+                original_ids = ','.join(temp_df['First_Word'].tolist())
+                ref_df.loc[ref_df['table_name'] == base_name, 'original_ids'] = original_ids
+    
+    # Save updated reference CSV
+    updated_csv_path = os.path.join(folder_path, 'updated_reference.csv')
+    ref_df.to_csv(updated_csv_path, index=False)
 
 # Example usage
-folder_path = 'your_folder_path_here'  # Replace with the actual folder path
-process_folder(folder_path)
+folder_path = 'your_folder_path_here'  # Replace with actual folder path
+reference_csv = 'reference.csv'  # Replace with actual reference CSV path
+process_folder(folder_path, reference_csv)
