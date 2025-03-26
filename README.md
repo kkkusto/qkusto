@@ -1,18 +1,26 @@
 import pandas as pd
 
-# Read the CSVs
-left_df = pd.read_csv('left.csv')
-right_df = pd.read_csv('right.csv')
+# Load CSV
+df = pd.read_csv('your_file.csv')
 
-# Clean: Remove rows where 'id' is NaN or empty string
-left_df = left_df[left_df['id'].notna() & (left_df['id'].astype(str).str.strip() != '')]
-right_df = right_df[right_df['id'].notna() & (right_df['id'].astype(str).str.strip() != '')]
+# Make sure table_name is a string
+df['table_name'] = df['table_name'].astype(str)
 
-# Optional: Convert to consistent type (e.g., int, str) for joining
-left_df['id'] = left_df['id'].astype(str)
-right_df['id'] = right_df['id'].astype(str)
+# 1. Tables starting with a number
+starts_with_number = df[df['table_name'].str.match(r'^\d')]
 
-# Perform left join
-merged_df = pd.merge(left_df, right_df, on='id', how='left')
+# 2. Tables containing 'tmp' or 'temp' (case-insensitive)
+has_tmp_or_temp = df[df['table_name'].str.contains(r'\b(tmp|temp)\b', case=False, regex=True)]
 
-print(merged_df)
+# 3. Tables containing 'backup', 'bkp', or 'bkup' (case-insensitive)
+has_backup_variants = df[df['table_name'].str.contains(r'\b(backup|bkp|bkup)\b', case=False, regex=True)]
+
+# Print results
+print("Tables starting with a number:")
+print(starts_with_number)
+
+print("\nTables with 'tmp' or 'temp':")
+print(has_tmp_or_temp)
+
+print("\nTables with 'backup', 'bkp', or 'bkup':")
+print(has_backup_variants)
