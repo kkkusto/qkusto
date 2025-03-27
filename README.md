@@ -53,3 +53,14 @@ fig.update_traces(textposition='outside')
 fig.update_layout(xaxis_tickangle=-30, yaxis=dict(title='Count'), showlegend=False)
 
 fig.show()
+
+
+# Save table names matching each rule to separate CSVs
+for rule in rule_columns:
+    matched_names = df[df[rule]][['table_name']].drop_duplicates()
+
+    # Map to user-friendly filename
+    label = label_map.get(rule, rule).lower().replace(" ", "_").replace("≤", "leq").replace("≥", "geq").replace(">", "gt").replace("<", "lt")
+    
+    filename = f"tables_{label}.csv"
+    matched_names.to_csv(filename, index=False)
