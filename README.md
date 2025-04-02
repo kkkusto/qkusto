@@ -1,75 +1,53 @@
 import pandas as pd
-import plotly.express as px
 
-# Load the CSV
-df = pd.read_csv('your_file.csv')
-df['table_name'] = df['table_name'].astype(str)
+# Step 1: Load the main dataframe
+main_df = pd.read_csv('main_file.csv')  # Replace with actual filename
 
-# Core 6 Rules
-df['starts_with_number'] = df['table_name'].str.match(r'^\d')
-df['has_tmp_or_temp'] = df['table_name'].str.contains(r'\b(tmp|temp)\b', case=False, regex=True)
-df['has_backup_variants'] = df['table_name'].str.contains(r'\b(backup|bkp|bkup)\b', case=False, regex=True)
-df['len_leq_3'] = df['table_name'].str.len() <= 3
-df['ends_with_number'] = df['table_name'].str.match(r'.*\d$')
-df['starts_with_3_digits'] = df['table_name'].str.match(r'^\d{3}\D') | df['table_name'].str.fullmatch(r'\d{3}')
+# Step 1: Filter out ENVIRON_NAME containing 'prod' or 'prd'
+main_df = main_df[~main_df['ENVIRON_NAME'].str.contains('prod|prd', case=False, na=False)]
 
-# New rules: ends with exactly N digits (1 to 6)
-for n in range(1, 7):
-    rule_name = f'ends_with_{n}_digits'
-    df[rule_name] = df['table_name'].str.contains(fr'(?<!\d)\d{{{n}}}$')
+# Step 2: Filter out PARM_DESC with substrings
+exclude_keywords = ['table', 'tbl', 'tlb', 'target', 'source']
+pattern = '|'.join(exclude_keywords)
+main_df = main_df[~main_df['PARM_DESC'].str.contains(pattern, case=False, na=False)]
 
-# Prepare all rule names for melting
-rule_columns = [
-    'starts_with_number',
-    'has_tmp_or_temp',
-    'has_backup_variants',
-    'len_leq_3',
-    'ends_with_number',
-    'starts_with_3_digits'
-] + [f'ends_with_{n}_digits' for n in range(1, 7)]
+# Step 3: Load table mapping
+table_map_df = pd.read_csv('db_table_map.csv')  # must contain 'table_name' column
 
-# Melt DataFrame
-melted = df.melt(id_vars='table_name',
-                 value_vars=rule_columns,
-                 var_name='Rule',
-                 value_name='Matched')
+# Placeholder for the final dataframe
+final_df = pd.DataFrame()
 
-# Filter matched only
-matched = melted[melted['Matched'] == True]
+# Step 4: For each table in table_map, process
+for _, row in table_map_df.iterrows():
+    table_name = row['table_name']
+    db_name = row['db_name'] if 'db_name' in row else None  # Optional
 
-# Count occurrences
-rule_counts = matched['Rule'].value_counts().reset_index()
-rule_counts.columns = ['Rule', 'Count']
+    # Filter main_df for matching table names in PARM_VAL
+    temp_df = main_df[main_df['PARM_VAL'].str.contains(table_name, na=False)]
 
-# Label mapping for better readability
-label_map = {
-    'starts_with_number': 'Starts with Number',
-    'has_tmp_or_temp': 'Has tmp/temp',
-    'has_backup_variants': 'Has backup/bkp/bkup',
-    'len_leq_3': 'Length ≤ 3',
-    'ends_with_number': 'Ends with Number',
-    'starts_with_3_digits': 'Starts with 3 Digits',
-    **{f'ends_with_{n}_digits': f'Ends with {n} Digit{"s" if n > 1 else ""}' for n in range(1, 7)}
-}
-rule_counts['Rule'] = rule_counts['Rule'].map(label_map)
+    if not temp_df.empty:
+        temp_df = temp_df.copy()
+        temp_df['table_name'] = table_name
+        temp_df['db_name'] = db_name
 
-# Plot
-fig = px.bar(rule_counts, x='Rule', y='Count', text='Count',
-             title='Table Name Rule Matches',
-             labels={'Rule': 'Rule Condition', 'Count': 'Number of Matches'})
+        # Step 5: Read runsheet
+        runsheet_df = pd.read_csv('runsheet.csv')  # replace with actual filename
 
-fig.update_traces(textposition='outside')
-fig.update_layout(xaxis_tickangle=-30, yaxis=dict(title='Count'), showlegend=False)
+        # Step 6: Match JOB_ID in runsheet column 'Executables_Symbolics'
+        temp2_df = pd.DataFrame()
+        for job_id in temp_df['JOB_ID']:
+            matched_rows = runsheet_df[runsheet_df['Executables_Symbolics'].str.contains(str(job_id), na=False)]
+            if not matched_rows.empty:
+                matched_rows = matched_rows.copy()
+                matched_rows['JOB_ID'] = job_id  # add for traceability
+                temp2_df = pd.concat([temp2_df, matched_rows], ignore_index=True)
 
-fig.show()
+        # Step 7: Add 'table_name' and 'db_name'
+        temp2_df['table_name'] = table_name
+        temp2_df['db_name'] = db_name
 
+        # Step 8: Append to final dataframe
+        final_df = pd.concat([final_df, temp2_df], ignore_index=True)
 
-# Save table names matching each rule to separate CSVs
-for rule in rule_columns:
-    matched_names = df[df[rule]][['table_name']].drop_duplicates()
-
-    # Map to user-friendly filename
-    label = label_map.get(rule, rule).lower().replace(" ", "_").replace("≤", "leq").replace("≥", "geq").replace(">", "gt").replace("<", "lt")
-    
-    filename = f"tables_{label}.csv"
-    matched_names.to_csv(filename, index=False)
+# Save final result
+final_df.to_csv('table_oracle_runsheet.csv', index=False)
