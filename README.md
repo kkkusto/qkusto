@@ -1,24 +1,26 @@
-import pandas as pd
+import networkx as nx
+import matplotlib.pyplot as plt
 
-# Sample data
-df1 = pd.DataFrame({'colX': [10, 20, 30]})
-df2 = pd.DataFrame({'A': [10, 20, 40], 'B': ['apple', 'banana', 'cherry']})
+# Define jobs
+jobs = [
+    {"job_id": "A", "before": []},
+    {"job_id": "B", "before": ["A"]},
+    {"job_id": "C", "before": ["A"]},
+    {"job_id": "D", "before": ["B", "C"]},
+    {"job_id": "E", "before": ["D"]},
+]
 
-# List to store matched values
-matched_values = []
+# Create directed graph
+G = nx.DiGraph()
 
-# Iterate over df1
-for value in df1['colX']:
-    # Check if value exists in df2['A']
-    match = df2.loc[df2['A'] == value, 'B']
-    
-    # Append the matched value if found, else None
-    if not match.empty:
-        matched_values.append(match.values[0])
-    else:
-        matched_values.append(None)
+# Add edges
+for job in jobs:
+    for dep in job["before"]:
+        G.add_edge(dep, job["job_id"])
 
-# Add list as new column
-df1['matched_B'] = matched_values
-
-print(df1)
+# Draw the graph
+plt.figure(figsize=(8, 6))
+pos = nx.spring_layout(G)
+nx.draw(G, pos, with_labels=True, node_size=2000, node_color='skyblue', arrows=True, font_size=12)
+plt.title("Job Dependency Graph")
+plt.show()
