@@ -1,7 +1,7 @@
 import re
 import csv
 
-INPUT  = "jobs.txt"           # your full job-definition file
+INPUT  = "jobs.txt"           # your raw file
 OUTPUT = "wrapper_input.csv"  # the CSV your wrapper expects
 
 def parse_blocks(path):
@@ -19,19 +19,12 @@ def parse_blocks(path):
                     buf = []
 
 def split_parenthesized(s):
-    """
-    Given a string like "(PAR1,PAR2,PAR3)",
-    strip parentheses and return ['PAR1','PAR2','PAR3'].
-    """
-    return [tok.strip()
-            for tok in s.strip().lstrip("(").rstrip(")").split(",")
+    """Turn '(A,B,C)' → ['A','B','C'] (stripping whitespace)."""
+    return [tok.strip() 
+            for tok in s.strip().lstrip("(").rstrip(")").split(",") 
             if tok.strip()]
 
 def extract(block):
-    """
-    From one job-block, build a dict of:
-      EventName, JobType, JobID, ScriptName, Dependencies
-    """
     info = {
         "EventName":   "",
         "JobType":     "",
@@ -40,58 +33,85 @@ def extract(block):
         "Dependencies":"",
     }
     deps = []
-    # to accumulate multi-line parenthesized deps
-    collecting = False
-    collect_buf = ""
-
-    # first line has the type and ID
+    
+    # State for multi-line collections
+    collecting_deps = False
+    deps_buf = ""
+    deps_prefix = None    # either "AFTER" or "REL"
+    
+    collecting_script = False
+    script_buf = ""
+    
+    # Parse the very first line: AIX_JOB or LINUX_JOB + ID
     m = re.match(r"^(AIX_JOB|LINUX_JOB)\s+(\S+)", block[0])
     info["JobType"], info["JobID"] = m.groups()
 
     for line in block[1:]:
-        # SCRIPTNAME → full path and file name
-        if line.startswith("SCRIPTNAME"):
-            script = line.split(None,1)[1]
-            info["ScriptName"] = script
-            info["EventName"]  = script.split("/")[-1]
-
-        # single-line REL
-        elif line.startswith("REL"):
-            rel = line.split(None,1)[1].strip()
-            deps.append(rel)
-
-        # start of AFTER (could be parenthesized or single)
-        elif line.startswith("AFTER"):
-            tail = line.split(None,1)[1].strip()
-            if tail.startswith("("):
-                # begin collecting until “)” appears
-                collecting = True
-                collect_buf = tail.lstrip("+")
-                if ")" in tail:
-                    collecting = False
-                    deps += split_parenthesized(collect_buf)
-            else:
-                # simple single job
-                deps.append(tail)
-
-        # continuation of a multi-line AFTER
-        elif collecting:
+        # ——— SCRIPTNAME handling ——————————————————————
+        if collecting_script:
             part = line.strip().lstrip("+")
-            collect_buf += part
+            script_buf += part
+            if not line.strip().endswith("+"):
+                # done collecting
+                info["ScriptName"] = script_buf
+                info["EventName"]  = script_buf.split("/")[-1]
+                collecting_script = False
+            continue
+
+        if line.startswith("SCRIPTNAME"):
+            tail = line.split(None,1)[1]
+            if tail.endswith("+"):
+                collecting_script = True
+                script_buf = tail.rstrip("+")
+            else:
+                info["ScriptName"] = tail
+                info["EventName"]  = tail.split("/")[-1]
+            continue
+
+        # ——— DEPENDENCY handling FOR AFTER and REL ——————————
+        # if already collecting deps (multi-line):
+        if collecting_deps:
+            part = line.strip().lstrip("+")
+            deps_buf += part
             if ")" in line:
-                collecting = False
-                deps += split_parenthesized(collect_buf)
+                # finish collecting
+                deps += split_parenthesized(deps_buf)
+                collecting_deps = False
+            continue
+
+        # start of AFTER or REL
+        if line.startswith("AFTER") or line.startswith("REL"):
+            keyword, rest = line.split(None,1)
+            rest = rest.strip()
+            # parenthesized multi-line?
+            if rest.startswith("("):
+                deps_prefix = keyword
+                collecting_deps = True
+                deps_buf = rest.lstrip("+")
+                # maybe it closes on the same line:
+                if ")" in rest:
+                    collecting_deps = False
+                    deps += split_parenthesized(deps_buf)
+            else:
+                # single ID
+                deps.append(rest)
+            continue
+
+        # everything else we ignore in this CSV
 
     info["Dependencies"] = ",".join(deps)
     return info
 
 def main():
-    jobs = [extract(b) for b in parse_blocks(INPUT)]
+    blocks = list(parse_blocks(INPUT))
+    jobs   = [extract(b) for b in blocks]
     with open(OUTPUT, "w", newline="") as csvfile:
-        w = csv.DictWriter(csvfile,
-            fieldnames=["EventName","JobType","JobID","ScriptName","Dependencies"])
-        w.writeheader()
-        w.writerows(jobs)
+        writer = csv.DictWriter(
+            csvfile,
+            fieldnames=["EventName","JobType","JobID","ScriptName","Dependencies"]
+        )
+        writer.writeheader()
+        writer.writerows(jobs)
     print(f"✔ Wrote {len(jobs)} rows to {OUTPUT}")
 
 if __name__ == "__main__":
