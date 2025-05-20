@@ -1,12 +1,11 @@
 import re
 import csv
-from collections import defaultdict, deque
 
-INPUT = "jobs.txt"           # your raw file
-OUTPUT = "wrapper_input.csv" # the “wrapper” input
+INPUT  = "jobs.txt"           # your full job-definition file
+OUTPUT = "wrapper_input.csv"  # the CSV your wrapper expects
 
 def parse_blocks(path):
-    """Yield lists of lines, one per job‐block."""
+    """Yield each job block (from AIX_JOB or LINUX_JOB down to ENDJOB)."""
     with open(path) as f:
         buf = []
         for raw in f:
@@ -19,96 +18,81 @@ def parse_blocks(path):
                     yield buf
                     buf = []
 
+def split_parenthesized(s):
+    """
+    Given a string like "(PAR1,PAR2,PAR3)",
+    strip parentheses and return ['PAR1','PAR2','PAR3'].
+    """
+    return [tok.strip()
+            for tok in s.strip().lstrip("(").rstrip(")").split(",")
+            if tok.strip()]
+
 def extract(block):
     """
-    Turn one block into a dict with:
-      - EventName, JobType, JobID, ScriptName (full path),
-      - deps: a Python list of dependency IDs
+    From one job-block, build a dict of:
+      EventName, JobType, JobID, ScriptName, Dependencies
     """
     info = {
-        "EventName":    "",
-        "JobType":      "",
-        "JobID":        "",
-        "ScriptName":   "",
-        "deps":         []
+        "EventName":   "",
+        "JobType":     "",
+        "JobID":       "",
+        "ScriptName":  "",
+        "Dependencies":"",
     }
-    # first line: job type & ID
+    deps = []
+    # to accumulate multi-line parenthesized deps
+    collecting = False
+    collect_buf = ""
+
+    # first line has the type and ID
     m = re.match(r"^(AIX_JOB|LINUX_JOB)\s+(\S+)", block[0])
     info["JobType"], info["JobID"] = m.groups()
-    for line in block:
+
+    for line in block[1:]:
+        # SCRIPTNAME → full path and file name
         if line.startswith("SCRIPTNAME"):
             script = line.split(None,1)[1]
             info["ScriptName"] = script
-            info["EventName"] = script.split("/")[-1]
-        elif line.startswith("AFTER") or line.startswith("REL"):
-            # grab the single token after
-            info["deps"].append(line.split()[1])
+            info["EventName"]  = script.split("/")[-1]
+
+        # single-line REL
+        elif line.startswith("REL"):
+            rel = line.split(None,1)[1].strip()
+            deps.append(rel)
+
+        # start of AFTER (could be parenthesized or single)
+        elif line.startswith("AFTER"):
+            tail = line.split(None,1)[1].strip()
+            if tail.startswith("("):
+                # begin collecting until “)” appears
+                collecting = True
+                collect_buf = tail.lstrip("+")
+                if ")" in tail:
+                    collecting = False
+                    deps += split_parenthesized(collect_buf)
+            else:
+                # simple single job
+                deps.append(tail)
+
+        # continuation of a multi-line AFTER
+        elif collecting:
+            part = line.strip().lstrip("+")
+            collect_buf += part
+            if ")" in line:
+                collecting = False
+                deps += split_parenthesized(collect_buf)
+
+    info["Dependencies"] = ",".join(deps)
     return info
 
-def topo_sort(jobs):
-    """
-    Kahn’s algorithm: input is list of job‐dicts with .JobID and .deps
-    Returns list of JobIDs in valid order, or raises if cycle detected.
-    """
-    # map id→job, build graph edges and indegree
-    jobs_by_id = {j["JobID"]: j for j in jobs}
-    graph = defaultdict(list)      # parent → list of children
-    indegree = defaultdict(int)    # child → # of unmet deps
-
-    # initialize
-    for job in jobs:
-        jid = job["JobID"]
-        indegree.setdefault(jid, 0)
-    # populate
-    for job in jobs:
-        for dep in job["deps"]:
-            if dep not in jobs_by_id:
-                # unknown dependency — you can warn or ignore
-                continue
-            graph[dep].append(job["JobID"])
-            indegree[job["JobID"]] += 1
-
-    # start with everything that has zero indegree
-    queue = deque([jid for jid, d in indegree.items() if d == 0])
-    sorted_list = []
-
-    while queue:
-        cur = queue.popleft()
-        sorted_list.append(cur)
-        for child in graph[cur]:
-            indegree[child] -= 1
-            if indegree[child] == 0:
-                queue.append(child)
-
-    if len(sorted_list) != len(jobs_by_id):
-        raise RuntimeError("Dependency cycle detected or missing jobs")
-
-    return sorted_list
-
 def main():
-    # 1. parse & extract
-    raw_blocks = list(parse_blocks(INPUT))
-    jobs        = [extract(b) for b in raw_blocks]
-
-    # 2. topological sort
-    order = topo_sort(jobs)
-
-    # 3. write CSV in that order
-    with open(OUTPUT, "w", newline="") as out:
-        writer = csv.writer(out)
-        writer.writerow(["EventName","JobType","JobID","ScriptName","Dependencies"])
-        for jid in order:
-            job = next(j for j in jobs if j["JobID"] == jid)
-            deps_str = ",".join(job["deps"])
-            writer.writerow([
-                job["EventName"],
-                job["JobType"],
-                job["JobID"],
-                job["ScriptName"],
-                deps_str
-            ])
-
-    print(f"→ Wrote {len(order)} jobs (in dependency order) to {OUTPUT}")
+    jobs = [extract(b) for b in parse_blocks(INPUT)]
+    with open(OUTPUT, "w", newline="") as csvfile:
+        w = csv.DictWriter(csvfile,
+            fieldnames=["EventName","JobType","JobID","ScriptName","Dependencies"])
+        w.writeheader()
+        w.writerows(jobs)
+    print(f"✔ Wrote {len(jobs)} rows to {OUTPUT}")
 
 if __name__ == "__main__":
     main()
