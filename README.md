@@ -1,12 +1,11 @@
 import re
 import csv
-import sys
-from collections import defaultdict, deque
 
 INPUT  = "jobs.txt"
 OUTPUT = "wrapper_input.csv"
 
 def parse_blocks(path):
+    """Yield each job block (from AIX_JOB or LINUX_JOB down to ENDJOB)."""
     with open(path) as f:
         buf = []
         for raw in f:
@@ -20,129 +19,107 @@ def parse_blocks(path):
                     buf = []
 
 def split_parenthesized(s):
-    return [tok.strip()
-            for tok in s.strip().lstrip("(").rstrip(")").split(",")
+    """Turn '(A,B,C)' → ['A','B','C'] (stripping whitespace)."""
+    return [tok.strip() 
+            for tok in s.strip().lstrip("(").rstrip(")").split(",") 
             if tok.strip()]
 
 def extract(block):
-    info = {"EventName": "", "JobType": "", "JobID": "",
-            "ScriptName": "", "Dependencies": ""}
-    deps = []
-    # states for multi-line collection
-    collecting_deps = False
-    deps_buf = ""
-    collecting_script = False
-    script_buf = ""
+    """
+    From one job-block, build a dict with these fields:
+      EventName, JobType, JobID, ScriptName, After (list), Rel (list)
+    """
+    info = {
+        "EventName":  "",
+        "JobType":    "",
+        "JobID":      "",
+        "ScriptName": "",
+        "After":      [],
+        "Rel":        []
+    }
 
-    # first line → JobType, JobID
+    # state machines for multi-line fields
+    collecting = None   # either "SCRIPT", "AFTER" or "REL"
+    buf = ""
+
+    # header → JobType and JobID
     m = re.match(r"^(AIX_JOB|LINUX_JOB)\s+(\S+)", block[0])
-    if not m:
-        raise RuntimeError("Malformed header: " + block[0])
     info["JobType"], info["JobID"] = m.groups()
 
     for line in block[1:]:
-        # —— SCRIPTNAME (multi-line safe) ——
-        if collecting_script:
+        # —— SCRIPTNAME (may span lines ending in '+') ——
+        if collecting == "SCRIPT":
             part = line.strip().lstrip("+")
-            script_buf += part
+            buf += part
             if not line.strip().endswith("+"):
-                info["ScriptName"] = script_buf
-                info["EventName"]  = script_buf.split("/")[-1]
-                collecting_script = False
+                info["ScriptName"] = buf
+                info["EventName"]  = buf.split("/")[-1]
+                collecting = None
             continue
 
         if line.startswith("SCRIPTNAME"):
-            tail = line.split(None,1)[1]
+            _, tail = line.split(None,1)
             if tail.endswith("+"):
-                collecting_script = True
-                script_buf = tail.rstrip("+")
+                collecting = "SCRIPT"
+                buf = tail.rstrip("+")
             else:
                 info["ScriptName"] = tail
                 info["EventName"]  = tail.split("/")[-1]
             continue
 
-        # —— DEPENDENCIES (AFTER & REL, multi-line safe) ——
-        if collecting_deps:
+        # —— AFTER / REL (may span lines inside parentheses) ——
+        if collecting in ("AFTER","REL"):
             part = line.strip().lstrip("+")
-            deps_buf += part
+            buf += part
+            # end if we see ')'
             if ")" in line:
-                deps += split_parenthesized(deps_buf)
-                collecting_deps = False
+                ids = split_parenthesized(buf)
+                info[collecting].extend(ids)
+                collecting = None
             continue
 
-        if line.startswith(("AFTER","REL")):
+        if line.startswith("AFTER") or line.startswith("REL"):
             keyword, rest = line.split(None,1)
             rest = rest.strip()
             if rest.startswith("("):
-                collecting_deps = True
-                deps_buf = rest.lstrip("+")
+                # multi-line parenthesized
+                collecting = keyword
+                buf = rest.lstrip("+")
                 if ")" in rest:
-                    collecting_deps = False
-                    deps += split_parenthesized(deps_buf)
+                    # all on one line
+                    ids = split_parenthesized(buf)
+                    info[keyword].extend(ids)
+                    collecting = None
             else:
-                deps.append(rest)
+                # single ID
+                info[keyword].append(rest)
             continue
 
-    info["Dependencies"] = deps  # store as a list for topo-sort
-    return info
+        # ignore everything else
 
-def topo_sort(jobs):
-    # build mapping JobID→job and graph
-    id2job = {j["JobID"]: j for j in jobs}
-    graph = defaultdict(list)   # dep → [job, job, ...]
-    indegree = {jid:0 for jid in id2job}
-
-    # populate edges
-    for j in jobs:
-        for dep in j["Dependencies"]:
-            if dep not in indegree:
-                # missing job: warn but ignore
-                print(f"⚠️  Warning: {j['JobID']} depends on unknown {dep}", file=sys.stderr)
-                continue
-            graph[dep].append(j["JobID"])
-            indegree[j["JobID"]] += 1
-
-    # Kahn’s algorithm
-    queue = deque([jid for jid,deg in indegree.items() if deg==0])
-    ordered = []
-    while queue:
-        u = queue.popleft()
-        ordered.append(u)
-        for v in graph[u]:
-            indegree[v] -= 1
-            if indegree[v] == 0:
-                queue.append(v)
-
-    if len(ordered) != len(id2job):
-        raise RuntimeError("Cycle detected or missing nodes in dependency graph")
-
-    # map back to job dicts
-    return [id2job[jid] for jid in ordered]
+    # flatten lists to comma-joined strings
+    return {
+        "EventName":  info["EventName"],
+        "JobType":    info["JobType"],
+        "JobID":      info["JobID"],
+        "ScriptName": info["ScriptName"],
+        "After":      ",".join(info["AFTER"]),
+        "Rel":        ",".join(info["REL"])
+    }
 
 def main():
     blocks = list(parse_blocks(INPUT))
-    jobs   = [extract(b) for b in blocks]
-    sorted_jobs = topo_sort(jobs)
+    rows   = [extract(b) for b in blocks]
 
-    # write CSV
     with open(OUTPUT, "w", newline="") as csvfile:
         writer = csv.DictWriter(
             csvfile,
-            fieldnames=["EventName","JobType","JobID","ScriptName","Dependencies"]
+            fieldnames=["EventName","JobType","JobID","ScriptName","After","Rel"]
         )
         writer.writeheader()
-        for j in sorted_jobs:
-            row = {
-                "EventName":  j["EventName"],
-                "JobType":    j["JobType"],
-                "JobID":      j["JobID"],
-                "ScriptName": j["ScriptName"],
-                # join back dependencies into comma-list:
-                "Dependencies": ",".join(j["Dependencies"])
-            }
-            writer.writerow(row)
+        writer.writerows(rows)
 
-    print(f"✔ Wrote {len(sorted_jobs)} rows (topologically sorted) to {OUTPUT}")
+    print(f"✔ Wrote {len(rows)} rows to {OUTPUT}")
 
 if __name__ == "__main__":
     main()
