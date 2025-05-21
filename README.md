@@ -1,41 +1,43 @@
-def topo_sort(jobs):
+# ---- DFS-based topo sort with robust handling ----
+def topo_sort_dfs(jobs):
     """
-    Topologically sort jobs where:
-      - After means this job depends on others (A → this)
-      - Rel means others depend on this job (this → R)
+    Topological sort using DFS.
+    Handles missing After/Rel targets with warnings.
     """
     id2job = {job["JobID"]: job for job in jobs}
-    graph = defaultdict(list)
-    indegree = {jid: 0 for jid in id2job}
+    graph = defaultdict(list)  # adjacency list
 
     for job in jobs:
-        # Handle AFTER: for each 'A' in After, edge A → this
+        jid = job["JobID"]
         for after_id in job["After"]:
-            if after_id not in id2job:
-                print(f"⚠️  Warning: {job['JobID']} has unknown After {after_id}", file=sys.stderr)
-                continue
-            graph[after_id].append(job["JobID"])
-            indegree[job["JobID"]] += 1
-        # Handle REL: for each 'R' in Rel, edge this → R
+            if after_id in id2job:
+                graph[after_id].append(jid)
+            else:
+                print(f"⚠️  Warning: {jid} has unknown After {after_id}", file=sys.stderr)
         for rel_id in job["Rel"]:
-            if rel_id not in id2job:
-                print(f"⚠️  Warning: {job['JobID']} has unknown Rel {rel_id}", file=sys.stderr)
-                continue
-            graph[job["JobID"]].append(rel_id)
-            indegree[rel_id] += 1
+            if rel_id in id2job:
+                graph[jid].append(rel_id)
+            else:
+                print(f"⚠️  Warning: {jid} has unknown Rel {rel_id}", file=sys.stderr)
 
-    # Kahn's algorithm
-    queue = deque([jid for jid, deg in indegree.items() if deg == 0])
-    ordered = []
-    while queue:
-        u = queue.popleft()
-        ordered.append(u)
-        for v in graph[u]:
-            indegree[v] -= 1
-            if indegree[v] == 0:
-                queue.append(v)
+    # DFS topo sort
+    visited = {}
+    ordering = []
+    def visit(node):
+        if node in visited:
+            if visited[node] == 1:
+                raise RuntimeError(f"Cycle detected at job {node}")
+            return
+        visited[node] = 1
+        for nbr in graph[node]:
+            visit(nbr)
+        visited[node] = 2
+        ordering.append(node)
 
-    if len(ordered) != len(id2job):
-        raise RuntimeError("Cycle detected in dependency graph")
+    # only traverse jobs we have data for
+    for jid in id2job:
+        if jid not in visited:
+            visit(jid)
 
-    return [id2job[jid] for jid in ordered]
+    ordering.reverse()  # because post-order DFS
+    return [id2job[jid] for jid in ordering]
