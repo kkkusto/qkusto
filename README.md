@@ -1,18 +1,43 @@
-<script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@11/dist/mermaid-layout-elk.esm.min.mjs';
+function handleScroll(event) {
+    event.preventDefault();
+    const mermaidContainer = document.querySelector('.mermaid-container');
+    // Select the SVG directly for scaling
+    const mermaidElement = document.querySelector('.mermaid svg'); 
+    if (!mermaidElement) return;
 
-  // Register the ELK layout engine
-  mermaid.registerLayoutLoaders(elkLayouts);
+    if (event.ctrlKey) {
+        let scale = Number(mermaidElement.getAttribute('data-scale')) || 1;
+        const zoomFactor = 0.1;
 
-  // Initialize Mermaid with the ELK layout
-  mermaid.initialize({
-    layout: 'elk',
-    theme: 'default',
-    elk: {
-      // Optional ELK-specific configurations
-      mergeEdges: true,
-      nodePlacementStrategy: 'NETWORK_SIMPLEX'
+        if (event.deltaY < 0) {
+            scale += zoomFactor;
+        } else {
+            scale -= zoomFactor;
+            if (scale < zoomFactor) scale = zoomFactor;
+        }
+        mermaidElement.style.transform = `scale(${scale})`;
+        mermaidElement.setAttribute('data-scale', scale);
+        // Keep transform-origin centered
+        mermaidElement.style.transformOrigin = "center center";
+    } else if (event.shiftKey) {
+        // Horizontal scroll
+        mermaidContainer.scrollLeft += event.deltaY;
+    } else {
+        // Vertical scroll
+        mermaidContainer.scrollTop += event.deltaY;
     }
-  });
-</script>
+}
+
+document.addEventListener('wheel', handleScroll, { passive: false });
+
+
+
+
+<div class="mermaid-container" style="overflow: auto; width: 100%; max-width: 800px; height: 500px;">
+  <div class="mermaid">
+    flowchart TD
+      A --> B
+      B --> C
+      C --> D
+  </div>
+</div>
