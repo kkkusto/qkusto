@@ -1,43 +1,51 @@
-function handleScroll(event) {
-    event.preventDefault();
-    const mermaidContainer = document.querySelector('.mermaid-container');
-    // Select the SVG directly for scaling
-    const mermaidElement = document.querySelector('.mermaid svg'); 
-    if (!mermaidElement) return;
-
-    if (event.ctrlKey) {
-        let scale = Number(mermaidElement.getAttribute('data-scale')) || 1;
-        const zoomFactor = 0.1;
-
-        if (event.deltaY < 0) {
-            scale += zoomFactor;
-        } else {
-            scale -= zoomFactor;
-            if (scale < zoomFactor) scale = zoomFactor;
-        }
-        mermaidElement.style.transform = `scale(${scale})`;
-        mermaidElement.setAttribute('data-scale', scale);
-        // Keep transform-origin centered
-        mermaidElement.style.transformOrigin = "center center";
-    } else if (event.shiftKey) {
-        // Horizontal scroll
-        mermaidContainer.scrollLeft += event.deltaY;
-    } else {
-        // Vertical scroll
-        mermaidContainer.scrollTop += event.deltaY;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mermaid + ELK Layout Example (Skypack CDN)</title>
+  <style>
+    .mermaid-container {
+      max-width: 800px;
+      margin: 32px auto;
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      background: #f8f9fa;
+      overflow: auto;
+      padding: 20px;
+      box-sizing: border-box;
+      height: 500px;
     }
-}
+    .mermaid svg {
+      display: block;
+      margin: auto;
+      transition: transform 0.2s;
+      transform-origin: center center;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    import elkLayouts from 'https://cdn.skypack.dev/@mermaid-js/layout-elk';
 
-document.addEventListener('wheel', handleScroll, { passive: false });
+    mermaid.registerLayoutLoaders(elkLayouts);
 
-
-
-
-<div class="mermaid-container" style="overflow: auto; width: 100%; max-width: 800px; height: 500px;">
-  <div class="mermaid">
-    flowchart TD
-      A --> B
-      B --> C
-      C --> D
+    mermaid.initialize({
+      layout: 'elk',
+      theme: 'default'
+    });
+  </script>
+</head>
+<body>
+  <div class="mermaid-container">
+    <div class="mermaid">
+flowchart TD
+  Start((Start)) --> A[Do something]
+  A --> B{Decision?}
+  B -- Yes --> C[Keep going]
+  B -- No  --> D[Stop]
+  C --> E[Final Step]
+  D --> E
+  E((End))
+    </div>
   </div>
-</div>
+</body>
+</html>
