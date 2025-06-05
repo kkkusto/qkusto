@@ -1,51 +1,50 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Mermaid + ELK Layout Example (Skypack CDN)</title>
-  <style>
-    .mermaid-container {
-      max-width: 800px;
-      margin: 32px auto;
-      border: 1px solid #bbb;
-      border-radius: 8px;
-      background: #f8f9fa;
-      overflow: auto;
-      padding: 20px;
-      box-sizing: border-box;
-      height: 500px;
-    }
-    .mermaid svg {
-      display: block;
-      margin: auto;
-      transition: transform 0.2s;
-      transform-origin: center center;
-    }
-  </style>
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-    import elkLayouts from 'https://cdn.skypack.dev/@mermaid-js/layout-elk';
+// Register ELK layout
+mermaid.registerLayoutLoaders(elkLayouts);
 
-    mermaid.registerLayoutLoaders(elkLayouts);
+mermaid.initialize({
+  layout: 'elk',
+  theme: 'default',
+  maxEdges: 8000, // Increase this as needed for larger graphs
+});
 
-    mermaid.initialize({
-      layout: 'elk',
-      theme: 'default'
+// Zoom and scroll handler
+function handleScroll(event) {
+  event.preventDefault();
+
+  const mermaidContainer = document.querySelector('.mermaid-container');
+  const mermaidElement = document.querySelector('.mermaid svg');
+  if (!mermaidContainer || !mermaidElement) return;
+
+  const ZOOM_FACTOR = 0.2;
+  const MIN_SCALE = 0.2;
+  const MAX_SCALE = 10;
+
+  // Handle zoom (Ctrl + scroll)
+  if (event.ctrlKey) {
+    let scale = parseFloat(mermaidElement.getAttribute('data-scale')) || 1;
+
+    if (event.deltaY < 0) {
+      scale = Math.min(scale + ZOOM_FACTOR, MAX_SCALE);
+    } else {
+      scale = Math.max(scale - ZOOM_FACTOR, MIN_SCALE);
+    }
+
+    // Apply scaling
+    requestAnimationFrame(() => {
+      mermaidElement.style.transform = `scale(${scale})`;
+      mermaidElement.setAttribute('data-scale', scale.toFixed(2));
+      mermaidElement.style.transformOrigin = 'center center';
     });
-  </script>
-</head>
-<body>
-  <div class="mermaid-container">
-    <div class="mermaid">
-flowchart TD
-  Start((Start)) --> A[Do something]
-  A --> B{Decision?}
-  B -- Yes --> C[Keep going]
-  B -- No  --> D[Stop]
-  C --> E[Final Step]
-  D --> E
-  E((End))
-    </div>
-  </div>
-</body>
-</html>
+  }
+  // Handle horizontal scroll (Shift + scroll)
+  else if (event.shiftKey) {
+    mermaidContainer.scrollLeft += event.deltaY;
+  }
+  // Handle vertical scroll
+  else {
+    mermaidContainer.scrollTop += event.deltaY;
+  }
+}
+
+// Attach event listener
+document.addEventListener('wheel', handleScroll, { passive: false });
