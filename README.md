@@ -1,158 +1,118 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Mermaid Diagram: Zoom + Pan</title>
-  <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-    }
-    .mermaid-container {
-      width: 100vw;
-      height: 100vh;
-      overflow: auto;
-      background: #f8f9fa;
-      border: 1px solid #ccc;
-      box-sizing: border-box;
-      position: relative;
-      cursor: grab;
-    }
-    .mermaid-container:active {
-      cursor: grabbing;
-    }
-    .mermaid svg {
-      display: block;
-      margin: auto;
-      transition: transform 0.1s;
-      /* Initially no transform-origin set; we set it dynamically */
-    }
-  </style>
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-    import elkLayouts from 'https://cdn.skypack.dev/@mermaid-js/layout-elk';
+1. Job Overview
+Job IDs: Focus on 711 and 712, both generating four files each.
 
-    mermaid.registerLayoutLoaders(elkLayouts);
+Types of jobs:
 
-    mermaid.initialize({
-      layout: 'elk',
-      theme: 'default',
-      maxEdges: 8000
-    });
+711 → Weekly job
 
-    window.addEventListener('DOMContentLoaded', () => {
-      const mermaidContainer = document.querySelector('.mermaid-container');
-      const diagram = document.querySelector('.mermaid');
+712 → Monthly job
 
-      // Initial pan/zoom state
-      let panX = 0;
-      let panY = 0;
-      let isPanning = false;
-      let startX = 0;
-      let startY = 0;
+Data Source: Both jobs use almost the same set of tables; the main difference is the data period considered.
 
-      // Render diagram
-      mermaid.init(undefined, diagram).then(() => {
-        const mermaidElement = diagram.querySelector('svg');
-        if (!mermaidElement) {
-          console.error('Mermaid SVG not found.');
-          return;
-        }
+📌 2. Dependency Management
+711/712 jobs have 10 dependencies each.
 
-        // Initialize scale
-        let scale = 1;
-        mermaidElement.setAttribute('data-scale', scale.toFixed(2));
-        updateTransform();
+The team analyzed these dependencies by looking into predecessor and successor jobs, which initially resulted in 100+ jobs.
 
-        // Zooming
-        document.addEventListener('wheel', (event) => {
-          if (!mermaidElement) return;
+But all 10 dependencies are linked to migrated table loads (no need to backtrack to the source).
 
-          const ZOOM_FACTOR = 0.2;
-          const MIN_SCALE = 0.2;
-          const MAX_SCALE = 10;
+The team decided: Find the equivalent RAW PHASE 2 jobs and handle dependencies only at that level.
 
-          if (event.ctrlKey) {
-            event.preventDefault();
+No need to re-create the entire chain from source — just maintain the dependency at the migrated table level.
 
-            // Zoom calculation
-            let newScale = scale + (event.deltaY < 0 ? 1 : -1) * ZOOM_FACTOR;
-            newScale = Math.max(MIN_SCALE, Math.min(newScale, MAX_SCALE));
+📌 3. Data Freshness
+These dependencies exist to ensure the latest data is pulled after all relevant data loads complete.
 
-            // Mouse position for zoom origin
-            const rect = mermaidElement.getBoundingClientRect();
-            const offsetX = event.clientX - rect.left;
-            const offsetY = event.clientY - rect.top;
-            const originX = (offsetX / rect.width) * 100;
-            const originY = (offsetY / rect.height) * 100;
+Without the dependencies, there's a risk of missing a day’s data.
 
-            // Adjust pan to zoom around mouse pointer
-            const prevWidth = rect.width * scale;
-            const prevHeight = rect.height * scale;
-            const newWidth = rect.width * newScale;
-            const newHeight = rect.height * newScale;
-            panX = panX - ((offsetX - panX) / scale) * (newScale - scale);
-            panY = panY - ((offsetY - panY) / scale) * (newScale - scale);
+For 711: uses 10 tables — the same-day load completion is mandatory to avoid missing data.
 
-            // Apply transform
-            scale = newScale;
-            mermaidElement.setAttribute('data-scale', scale.toFixed(2));
-            mermaidElement.style.transformOrigin = `${originX}% ${originY}%`;
-            updateTransform();
-          }
-          else if (event.shiftKey) {
-            mermaidContainer.scrollLeft += event.deltaY;
-          }
-          else {
-            mermaidContainer.scrollTop += event.deltaY;
-          }
-        }, { passive: false });
+Since all these are migrated tables, only the equivalent RAW PHASE 2 dependencies are needed.
 
-        // Panning
-        mermaidElement.addEventListener('mousedown', (event) => {
-          if (event.button !== 0) return; // Only left mouse button
-          isPanning = true;
-          startX = event.clientX - panX;
-          startY = event.clientY - panY;
-          mermaidContainer.style.cursor = 'grabbing';
-          event.preventDefault();
-        });
+No need to go back to the source data.
 
-        document.addEventListener('mousemove', (event) => {
-          if (!isPanning) return;
-          panX = event.clientX - startX;
-          panY = event.clientY - startY;
-          updateTransform();
-        });
+📌 4. Confirmation
+Speaker 3 confirms: 711 and 712 are loading the migrated tables — no need to go further back.
 
-        document.addEventListener('mouseup', () => {
-          if (isPanning) {
-            isPanning = false;
-            mermaidContainer.style.cursor = 'grab';
-          }
-        });
+📌 5. Filtering
+Speaker 2 shows that all tables used in the extract are Target tables.
 
-        function updateTransform() {
-          mermaidElement.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
-        }
-      });
-    });
-  </script>
-</head>
-<body>
-  <div class="mermaid-container">
-    <div class="mermaid">
-flowchart TD
-  Start((Start)) --> A[Do something]
-  A --> B{Decision?}
-  B -- Yes --> C[Keep going]
-  B -- No  --> D[Stop]
-  C --> E[Final Step]
-  D --> E
-  E((End))
-    </div>
-  </div>
-</body>
-</html>
+All relevant load jobs for these tables are already in the dependencies (400 series jobs).
+
+The 700 series jobs are the open batch jobs with dependencies attached.
+
+Analysis revealed: No further backtracking needed.
+
+Conclusion: Only 700 series dependencies need to be created.
+
+📌 6. Additional Use Cases
+Use case: Pros and Complaints
+
+Complaints:
+
+21 jobs → 19 complaints-related
+
+Weekly and monthly files are generated.
+
+Each table has one job to unload data and generate extracts.
+
+In total: 44 jobs → 42 simple jobs, 2 complicated ones.
+
+All jobs use 1-2 tables to unload data and share externally.
+
+Dependencies:
+
+Minimum 2–3 dependencies per job, always includes 736 (Clause job dependency).
+
+400 series jobs are mostly related to data load jobs of migrated tables.
+
+Recommendation:
+
+Only manage 700 series dependencies.
+
+Ignore 400 series dependencies.
+
+RAW PHASE 2 team will map the equivalent load jobs.
+
+Speaker 2 will provide:
+
+List of tables for which RAW PHASE 2 equivalent jobs are needed.
+
+The team will map the dependencies accordingly.
+
+📌 7. Status
+34 jobs related to Pros and Complaints.
+
+44 jobs total in this use case.
+
+Speaker 2 will share details about Outbound jobs (ABOP).
+
+ABOP outbound details shared.
+
+ABOP inbound still in progress.
+
+Dependencies to be clarified and finalized.
+
+📌 8. Migration Challenges
+Some tables are generated during global preprocessing of migrated jobs.
+
+The target tables exist in RAW PHASE 2, but intermediate tables are missing.
+
+RAW PHASE 2 team to provide information on where these intermediate tables exist.
+
+Column level mismatch identified between equivalent tables in RAW PHASE 2:
+
+Expectation: Table structure in RAW PHASE 2 should match the original.
+
+Some exceptions exist where additional columns are missing — impacts web service feeds.
+
+Need to raise this with RAW PHASE 2 team.
+
+📌 9. Tactical vs. Non-Tactical Tables
+Speaker 2 raises an observation:
+
+Tactical and non-tactical tables have the same structure but may differ in data retention.
+
+Could potentially reuse non-tactical tables instead of developing new tactical tables to save time.
+
+Approval needed for this approach.
