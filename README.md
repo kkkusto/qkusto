@@ -1,118 +1,250 @@
-1. Job Overview
-Job IDs: Focus on 711 and 712, both generating four files each.
 
-Types of jobs:
+import os
+import re
+import json
 
-711 → Weekly job
+def parse_sql_hql_files(folder_path):
+    parsed_data = []
 
-712 → Monthly job
+    # Regex patterns for DDL statements
+    DDL_PATTERNS = {
+        'CREATE_TABLE': re.compile(r'CREATE\s+(?:EXTERNAL\s+)?TABLE\s+IF\s+NOT\s+EXISTS\s+([^\s(]+)', re.IGNORECASE),
+        'ALTER_TABLE': re.compile(r'ALTER\s+TABLE\s+([^\s]+)', re.IGNORECASE),
+        'DROP_TABLE': re.compile(r'DROP\s+(?:EXTERNAL\s+)?TABLE\s+IF\s+EXISTS\s+([^\s]+)', re.IGNORECASE),
+        'CREATE_VIEW': re.compile(r'CREATE\s+VIEW\s+IF\s+NOT\s+EXISTS\s+([^\s(]+)', re.IGNORECASE),
+        'DROP_VIEW': re.compile(r'DROP\s+VIEW\s+IF\s+EXISTS\s+([^\s]+)', re.IGNORECASE),
+    }
 
-Data Source: Both jobs use almost the same set of tables; the main difference is the data period considered.
+    # Regex patterns for DML statements
+    DML_PATTERNS = {
+        'INSERT': re.compile(r'INSERT\s+(?:INTO\s+)?([^\s(]+)', re.IGNORECASE),
+        'UPDATE': re.compile(r'UPDATE\s+([^\s]+)', re.IGNORECASE),
+        'DELETE': re.compile(r'DELETE\s+FROM\s+([^\s]+)', re.IGNORECASE),
+        'SELECT': re.compile(r'FROM\s+([^\s;\n]+)', re.IGNORECASE), # This is a simplified regex for SELECT to get tables after FROM
+    }
 
-📌 2. Dependency Management
-711/712 jobs have 10 dependencies each.
+    for root, _, files in os.walk(folder_path):
+        for file_name in files:
+            if file_name.endswith(('.sql', '.hql')):
+                file_path = os.path.join(root, file_name)
+                with open(file_path, 'r') as f:
+                    content = f.read()
 
-The team analyzed these dependencies by looking into predecessor and successor jobs, which initially resulted in 100+ jobs.
+                # Split content into individual statements (basic splitting by semicolon)
+                statements = [s.strip() for s in content.split(';') if s.strip()]
 
-But all 10 dependencies are linked to migrated table loads (no need to backtrack to the source).
+                for statement in statements:
+                    statement_type = 'UNKNOWN'
+                    category = 'UNKNOWN'
+                    table_name = 'UNKNOWN'
 
-The team decided: Find the equivalent RAW PHASE 2 jobs and handle dependencies only at that level.
+                    # Check for DDL
+                    for ddl_type, pattern in DDL_PATTERNS.items():
+                        match = pattern.search(statement)
+                        if match:
+                            statement_type = ddl_type
+                            category = 'DDL'
+                            table_name = match.group(1).strip().split('.')[0] # Get the first part of the table name
+                            break
 
-No need to re-create the entire chain from source — just maintain the dependency at the migrated table level.
+                    # Check for DML if not DDL
+                    if category == 'UNKNOWN':
+                        for dml_type, pattern in DML_PATTERNS.items():
+                            match = pattern.search(statement)
+                            if match:
+                                statement_type = dml_type
+                                category = 'DML'
+                                # For SELECT, we might get multiple tables, for simplicity, taking the first one
+                                if dml_type == 'SELECT':
+                                    # This is a very basic attempt to get table names from SELECT. 
+                                    # A full-fledged SQL parser would be needed for accurate SELECT parsing.
+                                    tables_found = re.findall(r'FROM\s+([^\s;\n,]+)|JOIN\s+([^\s;\n,]+)', statement, re.IGNORECASE)
+                                    if tables_found:
+                                        table_name = ', '.join([t[0] or t[1] for t in tables_found if t[0] or t[1]])
+                                else:
+                                    table_name = match.group(1).strip().split('.')[0]
+                                break
 
-📌 3. Data Freshness
-These dependencies exist to ensure the latest data is pulled after all relevant data loads complete.
+                    parsed_data.append({
+                        'table': table_name,
+                        'statement_type': statement_type,
+                        'category': category,
+                        'statement': statement,
+                        'source_file': file_name,
+                        'source_folder': os.path.basename(root)
+                    })
+    return parsed_data
 
-Without the dependencies, there's a risk of missing a day’s data.
+if __name__ == '__main__':
+    # Example usage: Replace 'sql_files' with your folder path
+    # For testing, create a folder named 'sql_files' and put some .sql or .hql files inside.
+    # Example:
+    # sql_files/
+    #   -- create_table.sql
+    #   CREATE TABLE my_table (id INT, name STRING);
+    #   -- insert_data.sql
+    #   INSERT INTO my_table VALUES (1, 'test');
+    #   -- select_data.hql
+    #   SELECT * FROM another_table WHERE id = 1;
 
-For 711: uses 10 tables — the same-day load completion is mandatory to avoid missing data.
+    # Create a dummy folder and files for demonstration
+    if not os.path.exists('sql_files'):
+        os.makedirs('sql_files')
+    
+    with open('sql_files/create_table.sql', 'w') as f:
+        f.write('CREATE TABLE IF NOT EXISTS my_database.my_table (id INT, name STRING);\n')
+        f.write('ALTER TABLE my_database.my_table ADD COLUMNS (age INT);\n')
+    
+    with open('sql_files/insert_data.sql', 'w') as f:
+        f.write('INSERT INTO my_database.my_table VALUES (1, \'test\');\n')
+        f.write('UPDATE my_database.my_table SET name = \'new_test\' WHERE id = 1;\n')
+    
+    with open('sql_files/select_data.hql', 'w') as f:
+        f.write('SELECT a.col1, b.col2 FROM my_database.table_a a JOIN my_database.table_b b ON a.id = b.id;\n')
+        f.write('DROP VIEW IF EXISTS my_view;\n')
 
-Since all these are migrated tables, only the equivalent RAW PHASE 2 dependencies are needed.
+    results = parse_sql_hql_files('sql_files')
+    print(json.dumps(results, indent=4))
 
-No need to go back to the source data.
+    # Clean up dummy files and folder
+    os.remove('sql_files/create_table.sql')
+    os.remove('sql_files/insert_data.sql')
+    os.remove('sql_files/select_data.hql')
+    os.rmdir('sql_files')
 
-📌 4. Confirmation
-Speaker 3 confirms: 711 and 712 are loading the migrated tables — no need to go further back.
 
-📌 5. Filtering
-Speaker 2 shows that all tables used in the extract are Target tables.
+===============
 
-All relevant load jobs for these tables are already in the dependencies (400 series jobs).
 
-The 700 series jobs are the open batch jobs with dependencies attached.
 
-Analysis revealed: No further backtracking needed.
+import os
+import re
+import json
+import csv
 
-Conclusion: Only 700 series dependencies need to be created.
+def parse_sql_hql_files(folder_path):
+    parsed_data = []
 
-📌 6. Additional Use Cases
-Use case: Pros and Complaints
+    # Regex patterns for DDL statements
+    DDL_PATTERNS = {
+        'CREATE_TABLE': re.compile(r'CREATE\s+(?:EXTERNAL\s+)?TABLE\s+IF\s+NOT\s+EXISTS\s+([^\s(]+)', re.IGNORECASE),
+        'ALTER_TABLE': re.compile(r'ALTER\s+TABLE\s+([^\s]+)', re.IGNORECASE),
+        'DROP_TABLE': re.compile(r'DROP\s+(?:EXTERNAL\s+)?TABLE\s+IF\s+EXISTS\s+([^\s]+)', re.IGNORECASE),
+        'CREATE_VIEW': re.compile(r'CREATE\s+VIEW\s+IF\s+NOT\s+EXISTS\s+([^\s(]+)', re.IGNORECASE),
+        'DROP_VIEW': re.compile(r'DROP\s+VIEW\s+IF\s+EXISTS\s+([^\s]+)', re.IGNORECASE),
+    }
 
-Complaints:
+    # Regex patterns for DML statements
+    DML_PATTERNS = {
+        'INSERT': re.compile(r'INSERT\s+(?:INTO\s+)?([^\s(]+)', re.IGNORECASE),
+        'UPDATE': re.compile(r'UPDATE\s+([^\s]+)', re.IGNORECASE),
+        'DELETE': re.compile(r'DELETE\s+FROM\s+([^\s]+)', re.IGNORECASE),
+        'SELECT': re.compile(r'FROM\s+([^\s;\n]+)', re.IGNORECASE), # This is a simplified regex for SELECT to get tables after FROM
+    }
 
-21 jobs → 19 complaints-related
+    for root, _, files in os.walk(folder_path):
+        for file_name in files:
+            if file_name.endswith(('.sql', '.hql')):
+                file_path = os.path.join(root, file_name)
+                with open(file_path, 'r') as f:
+                    content = f.read()
 
-Weekly and monthly files are generated.
+                # Split content into individual statements (basic splitting by semicolon)
+                statements = [s.strip() for s in content.split(';') if s.strip()]
 
-Each table has one job to unload data and generate extracts.
+                for statement in statements:
+                    statement_type = 'UNKNOWN'
+                    category = 'UNKNOWN'
+                    table_name = 'UNKNOWN'
 
-In total: 44 jobs → 42 simple jobs, 2 complicated ones.
+                    # Check for DDL
+                    for ddl_type, pattern in DDL_PATTERNS.items():
+                        match = pattern.search(statement)
+                        if match:
+                            statement_type = ddl_type
+                            category = 'DDL'
+                            table_name = match.group(1).strip().split('.')[0] # Get the first part of the table name
+                            break
 
-All jobs use 1-2 tables to unload data and share externally.
+                    # Check for DML if not DDL
+                    if category == 'UNKNOWN':
+                        for dml_type, pattern in DML_PATTERNS.items():
+                            match = pattern.search(statement)
+                            if match:
+                                statement_type = dml_type
+                                category = 'DML'
+                                # For SELECT, we might get multiple tables, for simplicity, taking the first one
+                                if dml_type == 'SELECT':
+                                    # This is a very basic attempt to get table names from SELECT. 
+                                    # A full-fledged SQL parser would be needed for accurate SELECT parsing.
+                                    tables_found = re.findall(r'FROM\s+([^\s;\n,]+)|JOIN\s+([^\s;\n,]+)', statement, re.IGNORECASE)
+                                    if tables_found:
+                                        table_name = ', '.join([t[0] or t[1] for t in tables_found if t[0] or t[1]])
+                                else:
+                                    table_name = match.group(1).strip().split('.')[0]
+                                break
 
-Dependencies:
+                    parsed_data.append({
+                        'table': table_name,
+                        'statement_type': statement_type,
+                        'category': category,
+                        'statement': statement,
+                        'source_file': file_name,
+                        'source_folder': os.path.basename(root)
+                    })
+    return parsed_data
 
-Minimum 2–3 dependencies per job, always includes 736 (Clause job dependency).
+def write_to_csv(data, folder_path):
+    if not data:
+        print("No data to write to CSV.")
+        return
 
-400 series jobs are mostly related to data load jobs of migrated tables.
+    folder_name = os.path.basename(os.path.normpath(folder_path))
+    csv_file_name = f"{folder_name}_parsed_stmts.csv"
+    csv_file_path = os.path.join(os.getcwd(), csv_file_name)
 
-Recommendation:
+    keys = data[0].keys()
+    with open(csv_file_path, 'w', newline='') as output_file:
+        dict_writer = csv.DictWriter(output_file, keys)
+        dict_writer.writeheader()
+        dict_writer.writerows(data)
+    print(f"Data successfully written to {csv_file_path}")
 
-Only manage 700 series dependencies.
+if __name__ == '__main__':
+    # Example usage: Replace 'sql_files' with your folder path
+    # For testing, create a folder named 'sql_files' and put some .sql or .hql files inside.
+    # Example:
+    # sql_files/
+    #   -- create_table.sql
+    #   CREATE TABLE my_table (id INT, name STRING);
+    #   -- insert_data.sql
+    #   INSERT INTO my_table VALUES (1, 'test');
+    #   -- select_data.hql
+    #   SELECT * FROM another_table WHERE id = 1;
 
-Ignore 400 series dependencies.
+    # Create a dummy folder and files for demonstration
+    dummy_folder = 'sql_files'
+    if not os.path.exists(dummy_folder):
+        os.makedirs(dummy_folder)
+    
+    with open(os.path.join(dummy_folder, 'create_table.sql'), 'w') as f:
+        f.write('CREATE TABLE IF NOT EXISTS my_database.my_table (id INT, name STRING);\n')
+        f.write('ALTER TABLE my_database.my_table ADD COLUMNS (age INT);\n')
+    
+    with open(os.path.join(dummy_folder, 'insert_data.sql'), 'w') as f:
+        f.write('INSERT INTO my_database.my_table VALUES (1, \'test\');\n')
+        f.write('UPDATE my_database.my_table SET name = \'new_test\' WHERE id = 1;\n')
+    
+    with open(os.path.join(dummy_folder, 'select_data.hql'), 'w') as f:
+        f.write('SELECT a.col1, b.col2 FROM my_database.table_a a JOIN my_database.table_b b ON a.id = b.id;\n')
+        f.write('DROP VIEW IF EXISTS my_view;\n')
 
-RAW PHASE 2 team will map the equivalent load jobs.
+    results = parse_sql_hql_files(dummy_folder)
+    write_to_csv(results, dummy_folder)
 
-Speaker 2 will provide:
+    # Clean up dummy files and folder
+    os.remove(os.path.join(dummy_folder, 'create_table.sql'))
+    os.remove(os.path.join(dummy_folder, 'insert_data.sql'))
+    os.remove(os.path.join(dummy_folder, 'select_data.hql'))
+    os.rmdir(dummy_folder)
 
-List of tables for which RAW PHASE 2 equivalent jobs are needed.
-
-The team will map the dependencies accordingly.
-
-📌 7. Status
-34 jobs related to Pros and Complaints.
-
-44 jobs total in this use case.
-
-Speaker 2 will share details about Outbound jobs (ABOP).
-
-ABOP outbound details shared.
-
-ABOP inbound still in progress.
-
-Dependencies to be clarified and finalized.
-
-📌 8. Migration Challenges
-Some tables are generated during global preprocessing of migrated jobs.
-
-The target tables exist in RAW PHASE 2, but intermediate tables are missing.
-
-RAW PHASE 2 team to provide information on where these intermediate tables exist.
-
-Column level mismatch identified between equivalent tables in RAW PHASE 2:
-
-Expectation: Table structure in RAW PHASE 2 should match the original.
-
-Some exceptions exist where additional columns are missing — impacts web service feeds.
-
-Need to raise this with RAW PHASE 2 team.
-
-📌 9. Tactical vs. Non-Tactical Tables
-Speaker 2 raises an observation:
-
-Tactical and non-tactical tables have the same structure but may differ in data retention.
-
-Could potentially reuse non-tactical tables instead of developing new tactical tables to save time.
-
-Approval needed for this approach.
