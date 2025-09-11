@@ -1,59 +1,47 @@
 import pandas as pd
 
 # --- Step 1: Load data ---
-usecase_df = pd.read_excel("usecase_tables.xlsx")   # contains p1/p2/p3 info
+usecase_df = pd.read_excel("usecase_tables.xlsx")   # has p1/p2/p3 column
 all_tables_df = pd.read_excel("all_tables.xlsx")    # 1453 master list
 
-# Ensure consistent case and strip spaces
-usecase_df["Database"] = usecase_df["Database"].str.strip().str.lower()
-usecase_df["Table"] = usecase_df["Table"].str.strip().str.lower()
-all_tables_df["Database"] = all_tables_df["Database"].str.strip().str.lower()
-all_tables_df["Table"] = all_tables_df["Table"].str.strip().str.lower()
+# Normalize text
+for col in ["Database", "Table"]:
+    usecase_df[col] = usecase_df[col].str.strip().str.lower()
+    all_tables_df[col] = all_tables_df[col].str.strip().str.lower()
 
-# Create a unique identifier Database.Table
+# Unique key
 usecase_df["db_table"] = usecase_df["Database"] + "." + usecase_df["Table"]
 all_tables_df["db_table"] = all_tables_df["Database"] + "." + all_tables_df["Table"]
 
-# --- Step 2: Normalize p2.1, p2.2 → p2 ---
-usecase_df["priority"] = usecase_df["p1/p2/p3"].str.lower().replace({
-    "p2.1": "p2",
-    "p2.2": "p2"
-})
+# --- Step 2: Normalize priorities ---
+usecase_df["priority"] = usecase_df["p1/p2/p3"].str.strip().str.upper()
 
-# --- Step 3: Split by priority ---
-p1_tables = set(usecase_df.loc[usecase_df["priority"] == "p1", "db_table"])
-p2_tables = set(usecase_df.loc[usecase_df["priority"] == "p2", "db_table"])
-p3_tables = set(usecase_df.loc[usecase_df["priority"] == "p3", "db_table"])
-all_tables = set(all_tables_df["db_table"])
+# --- Step 3: Collect priorities per table ---
+priority_map = (
+    usecase_df.groupby("db_table")["priority"]
+    .apply(set)  # each table may have multiple tags
+    .to_dict()
+)
 
-# --- Step 4: Deduplication logic ---
-p1_unique = p1_tables
-p2_unique = p2_tables - p1_tables
-p3_unique = p3_tables - p1_tables - p2_tables
-not_associated = all_tables - (p1_unique | p2_unique | p3_unique)
+# --- Step 4: Conflict resolution function ---
+def resolve_priority(priorities):
+    if not priorities:
+        return "Not_Associated"
+    if "P1" in priorities:
+        return "P1"
+    if "P2.1" in priorities and "P3" in priorities:
+        return "P2.1"
+    if "P2.2" in priorities and "P3" in priorities:
+        return "P2.2"
+    # If only one priority or non-conflicting multiple
+    return sorted(priorities)[0]   # stable pick
 
-# --- Step 5: Convert to DataFrames ---
-def to_df(db_table_set, label):
-    data = [x.split(".", 1) for x in sorted(db_table_set)]
-    return pd.DataFrame(data, columns=["Database", "Table"])
+# --- Step 5: Assign priorities to all 1453 tables ---
+all_tables_df["priority_raw"] = all_tables_df["db_table"].map(priority_map)
+all_tables_df["Final_Priority"] = all_tables_df["priority_raw"].apply(resolve_priority)
 
-df_p1 = to_df(p1_unique, "P1")
-df_p2 = to_df(p2_unique, "P2")
-df_p3 = to_df(p3_unique, "P3")
-df_not = to_df(not_associated, "Not_Associated")
+# --- Step 6: Save output ---
+all_tables_df.drop(columns=["priority_raw"], inplace=True)
+all_tables_df.to_excel("all_tables_with_priority.xlsx", index=False)
 
-# --- Step 6: Add counts summary ---
-summary = pd.DataFrame({
-    "Bucket": ["P1", "P2", "P3", "Not_Associated", "Total_All_Tables"],
-    "Count": [len(df_p1), len(df_p2), len(df_p3), len(df_not), len(all_tables)]
-})
-
-# --- Step 7: Save results to Excel ---
-with pd.ExcelWriter("final_table_classification.xlsx", engine="openpyxl") as writer:
-    df_p1.to_excel(writer, sheet_name="P1_Unique", index=False)
-    df_p2.to_excel(writer, sheet_name="P2_Unique", index=False)
-    df_p3.to_excel(writer, sheet_name="P3_Unique", index=False)
-    df_not.to_excel(writer, sheet_name="Not_Associated", index=False)
-    summary.to_excel(writer, sheet_name="Summary", index=False)
-
-print("✅ Final classification saved to final_table_classification.xlsx")
+print("✅ Tagged priorities saved to all_tables_with_priority.xlsx")
