@@ -1,47 +1,56 @@
 import pandas as pd
+from pathlib import Path
 
-# --- Step 1: Load data ---
-usecase_df = pd.read_excel("usecase_tables.xlsx")   # has p1/p2/p3 column
-all_tables_df = pd.read_excel("all_tables.xlsx")    # 1453 master list
+def merge_excels(folder: str, output: str = "combined.xlsx"):
+    folder_path = Path(folder)
+    files = list(folder_path.glob("*.xlsx"))
 
-# Normalize text
-for col in ["Database", "Table"]:
-    usecase_df[col] = usecase_df[col].str.strip().str.lower()
-    all_tables_df[col] = all_tables_df[col].str.strip().str.lower()
+    all_frames = []
 
-# Unique key
-usecase_df["db_table"] = usecase_df["Database"] + "." + usecase_df["Table"]
-all_tables_df["db_table"] = all_tables_df["Database"] + "." + all_tables_df["Table"]
+    for file in files:
+        try:
+            # read all sheets
+            xls = pd.ExcelFile(file)
+            for sheet in xls.sheet_names:
+                df = pd.read_excel(file, sheet_name=sheet, engine="openpyxl")
 
-# --- Step 2: Normalize priorities ---
-usecase_df["priority"] = usecase_df["p1/p2/p3"].str.strip().str.upper()
+                # drop empty rows
+                df = df.dropna(how="all")
+                if df.empty:
+                    continue
 
-# --- Step 3: Collect priorities per table ---
-priority_map = (
-    usecase_df.groupby("db_table")["priority"]
-    .apply(set)  # each table may have multiple tags
-    .to_dict()
-)
+                # remove rows where 'comments' column has "Error"
+                if "comments" in (c.lower() for c in df.columns):
+                    # find the actual column name matching 'comments'
+                    colname = next(c for c in df.columns if c.lower() == "comments")
+                    df = df[~df[colname].astype(str).str.contains("error", case=False, na=False)]
 
-# --- Step 4: Conflict resolution function ---
-def resolve_priority(priorities):
-    if not priorities:
-        return "Not_Associated"
-    if "P1" in priorities:
-        return "P1"
-    if "P2.1" in priorities and "P3" in priorities:
-        return "P2.1"
-    if "P2.2" in priorities and "P3" in priorities:
-        return "P2.2"
-    # If only one priority or non-conflicting multiple
-    return sorted(priorities)[0]   # stable pick
+                # keep only needed columns
+                keep_cols = [c for c in df.columns if c.lower() in {"table_name", "size", "size in gb", "comments"}]
+                df = df[keep_cols]
 
-# --- Step 5: Assign priorities to all 1453 tables ---
-all_tables_df["priority_raw"] = all_tables_df["db_table"].map(priority_map)
-all_tables_df["Final_Priority"] = all_tables_df["priority_raw"].apply(resolve_priority)
+                # add source info
+                df.insert(0, "source_file", file.name)
+                df.insert(1, "sheet_name", sheet)
 
-# --- Step 6: Save output ---
-all_tables_df.drop(columns=["priority_raw"], inplace=True)
-all_tables_df.to_excel("all_tables_with_priority.xlsx", index=False)
+                all_frames.append(df)
 
-print("✅ Tagged priorities saved to all_tables_with_priority.xlsx")
+        except Exception as e:
+            print(f"[WARN] Skipping {file}: {e}")
+
+    if not all_frames:
+        print("No data found.")
+        return
+
+    combined = pd.concat(all_frames, ignore_index=True)
+
+    # save output
+    if output.endswith(".csv"):
+        combined.to_csv(output, index=False)
+    else:
+        combined.to_excel(output, index=False)
+
+    print(f"✅ Combined {len(all_frames)} frames from {len(files)} files into {output}")
+
+# Example usage:
+# merge_excels("C:/path/to/folder", "combined.xlsx")
