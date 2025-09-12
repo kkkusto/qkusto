@@ -1,56 +1,32 @@
 import pandas as pd
-from pathlib import Path
 
-def merge_excels(folder: str, output: str = "combined.xlsx"):
-    folder_path = Path(folder)
-    files = list(folder_path.glob("*.xlsx"))
+def summarize_by_db(combined: pd.DataFrame, output: str = "db_summary.xlsx"):
+    # Ensure column names are normalized
+    cols = {c.lower(): c for c in combined.columns}
+    size_gb_col = cols.get("size_in_gb")
+    size_tb_col = cols.get("size_in_tb")
+    size_pb_col = cols.get("size_in_pb")
+    table_col   = cols.get("table_name")
 
-    all_frames = []
+    if not table_col:
+        raise ValueError("No 'table_name' column found!")
 
-    for file in files:
-        try:
-            # read all sheets
-            xls = pd.ExcelFile(file)
-            for sheet in xls.sheet_names:
-                df = pd.read_excel(file, sheet_name=sheet, engine="openpyxl")
+    # Extract db from "db.table"
+    combined["database"] = combined[table_col].astype(str).str.split(".").str[0]
 
-                # drop empty rows
-                df = df.dropna(how="all")
-                if df.empty:
-                    continue
+    # Group by db and sum sizes
+    summary = combined.groupby("database", as_index=False)[[size_gb_col, size_tb_col, size_pb_col]].sum()
 
-                # remove rows where 'comments' column has "Error"
-                if "comments" in (c.lower() for c in df.columns):
-                    # find the actual column name matching 'comments'
-                    colname = next(c for c in df.columns if c.lower() == "comments")
-                    df = df[~df[colname].astype(str).str.contains("error", case=False, na=False)]
-
-                # keep only needed columns
-                keep_cols = [c for c in df.columns if c.lower() in {"table_name", "size", "size in gb", "comments"}]
-                df = df[keep_cols]
-
-                # add source info
-                df.insert(0, "source_file", file.name)
-                df.insert(1, "sheet_name", sheet)
-
-                all_frames.append(df)
-
-        except Exception as e:
-            print(f"[WARN] Skipping {file}: {e}")
-
-    if not all_frames:
-        print("No data found.")
-        return
-
-    combined = pd.concat(all_frames, ignore_index=True)
-
-    # save output
+    # Save output
     if output.endswith(".csv"):
-        combined.to_csv(output, index=False)
+        summary.to_csv(output, index=False)
     else:
-        combined.to_excel(output, index=False)
+        summary.to_excel(output, index=False)
 
-    print(f"✅ Combined {len(all_frames)} frames from {len(files)} files into {output}")
+    print(f"✅ Database summary saved to {output}")
+    return summary
 
-# Example usage:
-# merge_excels("C:/path/to/folder", "combined.xlsx")
+
+# Example usage after merging:
+# combined = merge_excels("C:/path/to/folder", "combined.xlsx")
+# summary = summarize_by_db(combined, "db_summary.xlsx")
