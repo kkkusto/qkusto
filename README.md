@@ -10,24 +10,29 @@ def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_
     data = []
     for idx, row in lineage_df.iterrows():
         use_case = row["UseCase"]
-        lineage = row["Lineage"]
+        lineage_cell = str(row["Lineage"])
 
-        if pd.isna(lineage):
+        if pd.isna(lineage_cell) or lineage_cell.strip() == "":
             continue
 
-        job_ids = [job.strip() for job in lineage.split("->")]
+        # Split multiple rows inside a cell (handle \n, ;, or commas if needed)
+        lineage_lines = [l.strip() for l in lineage_cell.splitlines() if l.strip()]
 
-        step = 1
-        for job in job_ids:
-            sub_jobs = job.split("_")
-            for sub_step, sub_job in enumerate(sub_jobs, start=1):
-                data.append({
-                    "UseCase": use_case,
-                    "Step": step,
-                    "SubStep": sub_step,
-                    "JobID": sub_job
-                })
-            step += 1
+        for lineage_idx, lineage in enumerate(lineage_lines, start=1):
+            job_ids = [job.strip() for job in lineage.split("->")]
+
+            step = 1
+            for job in job_ids:
+                sub_jobs = job.split("_")
+                for sub_step, sub_job in enumerate(sub_jobs, start=1):
+                    data.append({
+                        "UseCase": use_case,
+                        "LineageGroup": lineage_idx,  # so we know which row inside the cell
+                        "Step": step,
+                        "SubStep": sub_step,
+                        "JobID": sub_job
+                    })
+                step += 1
 
     expanded_df = pd.DataFrame(data)
 
