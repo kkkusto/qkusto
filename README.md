@@ -2,64 +2,72 @@ import pandas as pd
 import re
 
 def clean_jobid(jobid: str) -> str:
-    """Clean up JobID by removing unwanted characters."""
+    """Remove unwanted chars from job IDs."""
     return re.sub(r'[^A-Za-z0-9_]', '', jobid.strip())
 
-def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_lineage.xlsx"):
-    # Load lineage Excel
-    lineage_df = pd.read_excel(lineage_excel)
-    runsheet_df = pd.read_excel(runsheet_excel)
-
+def process_lineage_txt(input_txt, output_excel="processed_lineage.xlsx"):
     data = []
-    for idx, row in lineage_df.iterrows():
-        use_case = row["UseCase"]
-        lineage_cell = str(row["Lineage"])
 
-        if pd.isna(lineage_cell) or lineage_cell.strip() == "":
-            continue
+    with open(input_txt, "r") as f:
+        lineage_cell = f.read()
 
-        # Extract Main Job ID
-        main_job_match = re.search(r'Main Job ID[: ]*([A-Za-z0-9_]+)', lineage_cell)
-        main_job_id = clean_jobid(main_job_match.group(1)) if main_job_match else None
+    # Extract "Main Job ID"
+    main_job_match = re.search(r'Main Job ID[: ]*([A-Za-z0-9_]+)', lineage_cell)
+    main_job_id = main_job_match.group(1) if main_job_match else None
 
-        # Split multiple rows inside a lineage cell
-        lineage_lines = [l.strip() for l in lineage_cell.splitlines() if l.strip()]
+    # Split into multiple lineage rows if needed
+    lineage_lines = [l.strip() for l in lineage_cell.splitlines() if l.strip()]
 
-        # Track seen jobs per use case
-        seen_jobs = set()
+    seen_jobs = set()  # Track duplicates
 
-        for lineage_idx, lineage in enumerate(lineage_lines, start=1):
-            # Skip "Main Job ID" text line
-            if "Main Job ID" in lineage:
-                continue
+    for lineage_idx, lineage in enumerate(lineage_lines, start=1):
+        if "Main Job ID" in lineage:
+            continue  # Skip that line
 
-            job_ids = [clean_jobid(job) for job in lineage.split("->") if job.strip()]
+        # Split by ->
+        job_ids = [clean_jobid(job) for job in lineage.split("->") if job.strip()]
 
-            step = 1
-            for job in job_ids:
-                sub_jobs = job.split("_")
-                for sub_step, sub_job in enumerate(sub_jobs, start=1):
-                    sub_job = clean_jobid(sub_job)
+        step = 1
+        for job in job_ids:
+            sub_jobs = job.split("_")
 
-                    # Skip if it is the main job ID (will add later at the end)
-                    if sub_job == main_job_id:
-                        continue
-                    if sub_job in seen_jobs:
-                        continue
-                    seen_jobs.add(sub_job)
-
+            # Case 1: RFTCxxxx_Label → one job with label
+            if len(sub_jobs) == 2 and sub_jobs[0].startswith("RFTC") and not sub_jobs[1].startswith("RFTC"):
+                jobid = f"{sub_jobs[0]} ({sub_jobs[1]})"
+                if jobid not in seen_jobs:
                     data.append({
-                        "UseCase": use_case,
+                        "MainJobID": main_job_id,
+                        "LineageGroup": lineage_idx,
+                        "Step": step,
+                        "SubStep": 1,
+                        "JobID": jobid
+                    })
+                    seen_jobs.add(jobid)
+
+            else:
+                # Case 2: multiple JobIDs
+                for sub_step, token in enumerate(sub_jobs, start=1):
+                    token = clean_jobid(token)
+                    if not token or token in seen_jobs:
+                        continue
+                    data.append({
                         "MainJobID": main_job_id,
                         "LineageGroup": lineage_idx,
                         "Step": step,
                         "SubStep": sub_step,
-                        "JobID": sub_job
+                        "JobID": token
                     })
-                step += 1
+                    seen_jobs.add(token)
 
-        # Finally: add the Main Job ID once at the end
-        if main_job_id and main_job_id not in seen_jobs:
+            step += 1
+
+    df = pd.DataFrame(data)
+    df.to_excel(output_excel, index=False)
+    print(f"Processed lineage saved to {output_excel}")
+    return df
+
+# Example usage:
+# process_lineage_txt("lineage.txt", "output.xlsx")
             data.append({
                 "UseCase": use_case,
                 "MainJobID": main_job_id,
