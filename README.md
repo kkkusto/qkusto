@@ -1,29 +1,37 @@
 import pandas as pd
 
-def process_lineage_to_dataframe(file_path):
+def process_lineage_with_runsheet(lineage_file, runsheet_file, output_file="processed_lineage.xlsx"):
+    # Load runsheet Excel
+    runsheet_df = pd.read_excel(runsheet_file)
+    
     data = []
-    with open(file_path, "r") as f:
+    with open(lineage_file, "r") as f:
         for line_num, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
-                continue  # skip empty lines
+                continue
 
-            # Split lineage by '->' and strip spaces
             job_ids = [job.strip() for job in line.split("->")]
 
-            for step, job in enumerate(job_ids, start=1):
-                data.append({
-                    "Lineage": line_num,
-                    "Step": step,
-                    "JobID": job
-                })
+            step = 1
+            for job in job_ids:
+                # If multiple jobs are combined with '_'
+                sub_jobs = job.split("_")
+                for sub_step, sub_job in enumerate(sub_jobs, start=1):
+                    data.append({
+                        "Lineage": line_num,
+                        "Step": step,
+                        "SubStep": sub_step,
+                        "JobID": sub_job
+                    })
+                step += 1
 
-    return pd.DataFrame(data)
+    lineage_df = pd.DataFrame(data)
 
+    # Merge with runsheet (must contain JobID column)
+    merged_df = pd.merge(lineage_df, runsheet_df, on="JobID", how="left")
 
-# Example usage with your TXT file
-file_path = "/mnt/data/lineage.txt"  # placeholder, user should upload file here
-df = process_lineage_to_dataframe(file_path)
-
-import caas_jupyter_tools
-caas_jupyter_tools.display_dataframe_to_user("Processed Lineage", df)
+    # Save output
+    merged_df.to_excel(output_file, index=False)
+    print(f"Processed lineage saved to {output_file}")
+    return merged_df
