@@ -1,37 +1,40 @@
 import pandas as pd
 
-def process_lineage_with_runsheet(lineage_file, runsheet_file, output_file="processed_lineage.xlsx"):
+def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_lineage.xlsx"):
+    # Load lineage Excel
+    lineage_df = pd.read_excel(lineage_excel)
+
     # Load runsheet Excel
-    runsheet_df = pd.read_excel(runsheet_file)
-    
+    runsheet_df = pd.read_excel(runsheet_excel)
+
     data = []
-    with open(lineage_file, "r") as f:
-        for line_num, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
+    for idx, row in lineage_df.iterrows():
+        use_case = row["UseCase"]
+        lineage = row["Lineage"]
 
-            job_ids = [job.strip() for job in line.split("->")]
+        if pd.isna(lineage):
+            continue
 
-            step = 1
-            for job in job_ids:
-                # If multiple jobs are combined with '_'
-                sub_jobs = job.split("_")
-                for sub_step, sub_job in enumerate(sub_jobs, start=1):
-                    data.append({
-                        "Lineage": line_num,
-                        "Step": step,
-                        "SubStep": sub_step,
-                        "JobID": sub_job
-                    })
-                step += 1
+        job_ids = [job.strip() for job in lineage.split("->")]
 
-    lineage_df = pd.DataFrame(data)
+        step = 1
+        for job in job_ids:
+            sub_jobs = job.split("_")
+            for sub_step, sub_job in enumerate(sub_jobs, start=1):
+                data.append({
+                    "UseCase": use_case,
+                    "Step": step,
+                    "SubStep": sub_step,
+                    "JobID": sub_job
+                })
+            step += 1
 
-    # Merge with runsheet (must contain JobID column)
-    merged_df = pd.merge(lineage_df, runsheet_df, on="JobID", how="left")
+    expanded_df = pd.DataFrame(data)
 
-    # Save output
+    # Merge with runsheet details (assuming JobID is the join key)
+    merged_df = pd.merge(expanded_df, runsheet_df, on="JobID", how="left")
+
+    # Save final result
     merged_df.to_excel(output_file, index=False)
     print(f"Processed lineage saved to {output_file}")
     return merged_df
