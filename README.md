@@ -18,18 +18,18 @@ def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_
         if pd.isna(lineage_cell) or lineage_cell.strip() == "":
             continue
 
-        # Extract "Main Job ID" if present
+        # Extract Main Job ID
         main_job_match = re.search(r'Main Job ID[: ]*([A-Za-z0-9_]+)', lineage_cell)
-        main_job_id = main_job_match.group(1) if main_job_match else None
+        main_job_id = clean_jobid(main_job_match.group(1)) if main_job_match else None
 
-        # Split into multiple lineage rows if needed
+        # Split multiple rows inside a lineage cell
         lineage_lines = [l.strip() for l in lineage_cell.splitlines() if l.strip()]
 
         # Track seen jobs per use case
         seen_jobs = set()
 
         for lineage_idx, lineage in enumerate(lineage_lines, start=1):
-            # Skip "Main Job ID" part if present in lineage text
+            # Skip "Main Job ID" text line
             if "Main Job ID" in lineage:
                 continue
 
@@ -40,6 +40,10 @@ def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_
                 sub_jobs = job.split("_")
                 for sub_step, sub_job in enumerate(sub_jobs, start=1):
                     sub_job = clean_jobid(sub_job)
+
+                    # Skip if it is the main job ID (will add later at the end)
+                    if sub_job == main_job_id:
+                        continue
                     if sub_job in seen_jobs:
                         continue
                     seen_jobs.add(sub_job)
@@ -54,12 +58,24 @@ def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_
                     })
                 step += 1
 
+        # Finally: add the Main Job ID once at the end
+        if main_job_id and main_job_id not in seen_jobs:
+            data.append({
+                "UseCase": use_case,
+                "MainJobID": main_job_id,
+                "LineageGroup": lineage_idx,  # last group processed
+                "Step": step,
+                "SubStep": 1,
+                "JobID": main_job_id
+            })
+
     expanded_df = pd.DataFrame(data)
 
-    # Merge with runsheet details (JobID as key)
+    # Merge with runsheet
     merged_df = pd.merge(expanded_df, runsheet_df, on="JobID", how="left")
 
-    # Save output
+    # Save
     merged_df.to_excel(output_file, index=False)
     print(f"Processed lineage saved to {output_file}")
+    return merged_df
     return merged_df
