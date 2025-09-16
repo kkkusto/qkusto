@@ -1,4 +1,9 @@
 import pandas as pd
+import re
+
+def clean_jobid(jobid: str) -> str:
+    """Clean up JobID by removing unwanted characters."""
+    return re.sub(r'[^A-Za-z0-9_]', '', jobid.strip())
 
 def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_lineage.xlsx"):
     # Load lineage Excel
@@ -13,25 +18,35 @@ def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_
         if pd.isna(lineage_cell) or lineage_cell.strip() == "":
             continue
 
-        # Track seen JobIDs per UseCase
-        seen_jobs = set()
+        # Extract "Main Job ID" if present
+        main_job_match = re.search(r'Main Job ID[: ]*([A-Za-z0-9_]+)', lineage_cell)
+        main_job_id = main_job_match.group(1) if main_job_match else None
 
-        # Split multiple rows in a single cell (\n-separated)
+        # Split into multiple lineage rows if needed
         lineage_lines = [l.strip() for l in lineage_cell.splitlines() if l.strip()]
 
+        # Track seen jobs per use case
+        seen_jobs = set()
+
         for lineage_idx, lineage in enumerate(lineage_lines, start=1):
-            job_ids = [job.strip() for job in lineage.split("->")]
+            # Skip "Main Job ID" part if present in lineage text
+            if "Main Job ID" in lineage:
+                continue
+
+            job_ids = [clean_jobid(job) for job in lineage.split("->") if job.strip()]
 
             step = 1
             for job in job_ids:
                 sub_jobs = job.split("_")
                 for sub_step, sub_job in enumerate(sub_jobs, start=1):
+                    sub_job = clean_jobid(sub_job)
                     if sub_job in seen_jobs:
-                        continue  # skip duplicates for this UseCase
+                        continue
                     seen_jobs.add(sub_job)
 
                     data.append({
                         "UseCase": use_case,
+                        "MainJobID": main_job_id,
                         "LineageGroup": lineage_idx,
                         "Step": step,
                         "SubStep": sub_step,
@@ -41,10 +56,10 @@ def process_lineage_excel(lineage_excel, runsheet_excel, output_file="processed_
 
     expanded_df = pd.DataFrame(data)
 
-    # Merge with runsheet details (assuming JobID is the join key)
+    # Merge with runsheet details (JobID as key)
     merged_df = pd.merge(expanded_df, runsheet_df, on="JobID", how="left")
 
-    # Save to Excel
+    # Save output
     merged_df.to_excel(output_file, index=False)
     print(f"Processed lineage saved to {output_file}")
     return merged_df
