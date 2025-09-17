@@ -6,8 +6,10 @@ def parse_lineage(lineage_text, output_csv):
     graph = defaultdict(list)
     indegree = defaultdict(int)
     nodes = set()
+    appearance_order = {}  # track first appearance order
+    order_counter = 0
 
-    # Parse dependencies
+    # Parse dependencies in order
     for line in lineage_text.strip().splitlines():
         if "->" not in line or "Lineage" in line or "Main Job ID" in line:
             continue
@@ -15,30 +17,41 @@ def parse_lineage(lineage_text, output_csv):
         lhs = lhs.strip()
         rhs_parts = re.split(r"[_ ,]", rhs.strip())
         rhs_parts = [r for r in rhs_parts if r]
+
+        if lhs not in appearance_order:
+            appearance_order[lhs] = order_counter
+            order_counter += 1
+
         for rhs in rhs_parts:
             graph[lhs].append(rhs)
             indegree[rhs] += 1
             nodes.add(lhs)
             nodes.add(rhs)
+            if rhs not in appearance_order:
+                appearance_order[rhs] = order_counter
+                order_counter += 1
 
-    # Initialize queue with jobs having no dependencies before them
-    queue = deque([n for n in nodes if indegree[n] == 0])
+    # Initialize queue with jobs that have no incoming edges
+    queue = deque(sorted([n for n in nodes if indegree[n] == 0],
+                         key=lambda x: appearance_order[x]))
     ordered = []
 
     while queue:
         node = queue.popleft()
         ordered.append(node)
-        for neighbor in graph[node]:
+
+        for neighbor in sorted(graph[node], key=lambda x: appearance_order[x]):
             indegree[neighbor] -= 1
             if indegree[neighbor] == 0:
                 queue.append(neighbor)
 
-    # Check for cycle (if not all nodes covered)
+    # Detect cycles
     if len(ordered) < len(nodes):
-        print("⚠️ Warning: Cycle detected in dependencies. Some jobs may depend on each other.")
-        # Append remaining nodes (to not lose them)
-        remaining = [n for n in nodes if n not in ordered]
-        ordered.extend(remaining)
+        print("⚠️ Warning: Cycle detected in dependencies.")
+        # Add the missing nodes in original order
+        for n in sorted(nodes, key=lambda x: appearance_order[x]):
+            if n not in ordered:
+                ordered.append(n)
 
     # Build DataFrame
     df = pd.DataFrame({
