@@ -1,89 +1,54 @@
 import pandas as pd
+import cx_Oracle  # or use oracledb
 import re
 
-def clean_jobid(jobid: str) -> str:
-    """Remove unwanted chars from job IDs."""
-    return re.sub(r'[^A-Za-z0-9_]', '', jobid.strip())
+# --- Oracle connection ---
+dsn = cx_Oracle.makedsn("host", 1521, service_name="service")
+conn = cx_Oracle.connect(user="username", password="password", dsn=dsn)
 
-def process_lineage_txt(input_txt, output_excel="processed_lineage.xlsx"):
-    data = []
-
-    with open(input_txt, "r") as f:
-        lineage_cell = f.read()
-
-    # Extract "Main Job ID"
-    main_job_match = re.search(r'Main Job ID[: ]*([A-Za-z0-9_]+)', lineage_cell)
-    main_job_id = main_job_match.group(1) if main_job_match else None
-
-    # Split into multiple lineage rows if needed
-    lineage_lines = [l.strip() for l in lineage_cell.splitlines() if l.strip()]
-
-    seen_jobs = set()  # Track duplicates
-
-    for lineage_idx, lineage in enumerate(lineage_lines, start=1):
-        if "Main Job ID" in lineage:
-            continue  # Skip that line
-
-        # Split by ->
-        job_ids = [clean_jobid(job) for job in lineage.split("->") if job.strip()]
-
-        step = 1
-        for job in job_ids:
-            sub_jobs = job.split("_")
-
-            # Case 1: RFTCxxxx_Label → one job with label
-            if len(sub_jobs) == 2 and sub_jobs[0].startswith("RFTC") and not sub_jobs[1].startswith("RFTC"):
-                jobid = f"{sub_jobs[0]} ({sub_jobs[1]})"
-                if jobid not in seen_jobs:
-                    data.append({
-                        "MainJobID": main_job_id,
-                        "LineageGroup": lineage_idx,
-                        "Step": step,
-                        "SubStep": 1,
-                        "JobID": jobid
-                    })
-                    seen_jobs.add(jobid)
-
-            else:
-                # Case 2: multiple JobIDs
-                for sub_step, token in enumerate(sub_jobs, start=1):
-                    token = clean_jobid(token)
-                    if not token or token in seen_jobs:
-                        continue
-                    data.append({
-                        "MainJobID": main_job_id,
-                        "LineageGroup": lineage_idx,
-                        "Step": step,
-                        "SubStep": sub_step,
-                        "JobID": token
-                    })
-                    seen_jobs.add(token)
-
-            step += 1
-
-    df = pd.DataFrame(data)
-    df.to_excel(output_excel, index=False)
-    print(f"Processed lineage saved to {output_excel}")
+def fetch_job_params(proj_id, dept_id, job_id):
+    query = """
+        SELECT PARM_NAME, PARM_VAL, SUB_PARM_TYPE
+        FROM job_parameter_detail
+        WHERE proj_id = :proj_id
+          AND dept_id = :dept_id
+          AND job_id  = :job_id
+    """
+    df = pd.read_sql(query, conn, params={"proj_id": proj_id, "dept_id": dept_id, "job_id": job_id})
     return df
 
-# Example usage:
-# process_lineage_txt("lineage.txt", "output.xlsx")
-            data.append({
-                "UseCase": use_case,
-                "MainJobID": main_job_id,
-                "LineageGroup": lineage_idx,  # last group processed
-                "Step": step,
-                "SubStep": 1,
-                "JobID": main_job_id
-            })
+def process_job(proj_id, dept_id, job_id):
+    df = fetch_job_params(proj_id, dept_id, job_id)
 
-    expanded_df = pd.DataFrame(data)
+    # If child jobs exist
+    if "childName" in df["PARM_NAME"].values:
+        results = []
+        child_rows = df[df["PARM_NAME"] == "childName"]
 
-    # Merge with runsheet
-    merged_df = pd.merge(expanded_df, runsheet_df, on="JobID", how="left")
+        for _, row in child_rows.iterrows():
+            if row["SUB_PARM_TYPE"].startswith("Child"):
+                new_job_id = row["PARM_VAL"]
+                results.extend(process_job(proj_id, dept_id, new_job_id))
+        return results
+    else:
+        # Leaf job: return dict of params
+        return [{row["PARM_NAME"]: row["PARM_VAL"] for _, row in df.iterrows()}]
 
-    # Save
-    merged_df.to_excel(output_file, index=False)
-    print(f"Processed lineage saved to {output_file}")
-    return merged_df
-    return merged_df
+# --- Main ---
+excel_df = pd.read_excel("input.xlsx")
+
+all_results = []
+
+for idx, row in excel_df.iterrows():
+    try:
+        proj_id, dept_id, job_id = row[0].split()
+        results = process_job(proj_id, dept_id, job_id)
+        all_results.extend(results)
+    except Exception as e:
+        print(f"Error processing row {idx}: {e}")
+
+# Convert to DataFrame
+final_df = pd.DataFrame(all_results)
+
+# Save to Excel
+final_df.to_excel("output.xlsx", index=False)
