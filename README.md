@@ -1,68 +1,33 @@
 import pandas as pd
-import re
-from collections import defaultdict, deque
 
-def parse_lineage(lineage_text, output_csv):
-    graph = defaultdict(list)
-    indegree = defaultdict(int)
-    nodes = set()
-    appearance_order = {}  # track first appearance order
-    order_counter = 0
+def expand_jobids_with_info(input_csv, output_csv):
+    df = pd.read_csv(input_csv)
+    expanded_rows = []
 
-    # Parse dependencies in order
-    for line in lineage_text.strip().splitlines():
-        if "->" not in line or "Lineage" in line or "Main Job ID" in line:
-            continue
-        lhs, rhs = line.split("->")
-        lhs = lhs.strip()
-        rhs_parts = re.split(r"[_ ,]", rhs.strip())
-        rhs_parts = [r for r in rhs_parts if r]
+    for _, row in df.iterrows():
+        step = row["Step Number"]
+        job_ids = str(row["Job ID"]).split("_")  # split by underscore
 
-        if lhs not in appearance_order:
-            appearance_order[lhs] = order_counter
-            order_counter += 1
+        for part in job_ids:
+            part = part.strip()
+            if not part:
+                continue
 
-        for rhs in rhs_parts:
-            graph[lhs].append(rhs)
-            indegree[rhs] += 1
-            nodes.add(lhs)
-            nodes.add(rhs)
-            if rhs not in appearance_order:
-                appearance_order[rhs] = order_counter
-                order_counter += 1
+            if part.startswith("RFT"):
+                expanded_rows.append({"Step Number": step, "Job ID": part, "Info": ""})
+            else:
+                # Attach to last added row as Info
+                if expanded_rows:
+                    expanded_rows[-1]["Info"] = part
+                else:
+                    expanded_rows.append({"Step Number": step, "Job ID": "", "Info": part})
 
-    # Initialize queue with jobs that have no incoming edges
-    queue = deque(sorted([n for n in nodes if indegree[n] == 0],
-                         key=lambda x: appearance_order[x]))
-    ordered = []
+    expanded_df = pd.DataFrame(expanded_rows)
 
-    while queue:
-        node = queue.popleft()
-        ordered.append(node)
+    # Save
+    expanded_df.to_csv(output_csv, index=False)
+    print(f"Expanded Job IDs with Info saved to {output_csv}")
+    return expanded_df
 
-        for neighbor in sorted(graph[node], key=lambda x: appearance_order[x]):
-            indegree[neighbor] -= 1
-            if indegree[neighbor] == 0:
-                queue.append(neighbor)
-
-    # Detect cycles
-    if len(ordered) < len(nodes):
-        print("⚠️ Warning: Cycle detected in dependencies.")
-        # Add the missing nodes in original order
-        for n in sorted(nodes, key=lambda x: appearance_order[x]):
-            if n not in ordered:
-                ordered.append(n)
-
-    # Build DataFrame
-    df = pd.DataFrame({
-        "Step Number": range(1, len(ordered) + 1),
-        "Job ID": ordered
-    })
-
-    df.to_csv(output_csv, index=False)
-    print(f"Saved sequence to {output_csv}")
-    return df
-lineage_text = """
-
-"""
-df = parse_lineage(lineage_text, "job_sequence_resolved3.csv")
+# Example usage:
+# expand_jobids_with_info("job_sequence_resolved.csv", "job_sequence_expanded.csv")
