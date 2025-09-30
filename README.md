@@ -1,29 +1,19 @@
-#!/bin/bash
-
-LOGFILE=your_logfile.log
-OUTFILE=table_mapping.csv
-
-# Write header
-echo "Source_Table,Target" > $OUTFILE
-
-# Look for sqoop import lines
-grep -i "sqoop import" $LOGFILE | while read line; do
-    # Extract source table
-    src=$(echo $line | grep -oP '(?<=--table )\S+')
-
-    # Extract hive target if present
-    tgt_hive=$(echo $line | grep -oP '(?<=--hive-table )\S+')
-
-    # Extract HDFS target if present
-    tgt_hdfs=$(echo $line | grep -oP '(?<=--target-dir )\S+')
-
-    # Decide target priority: Hive table > HDFS dir
-    if [ -n "$tgt_hive" ]; then
-        tgt=$tgt_hive
-    else
-        tgt=$tgt_hdfs
-    fi
-
-    # Write to CSV
-    echo "$src,$tgt" >> $OUTFILE
-done
+flowchart TD
+    A[Start Script] --> B[Source Environment & Config Files]
+    B --> C[Hive Query: Get Previous Run Date / Partition Prep]
+    C --> D[Run Sqoop Extraction (Parquet, Spark, HDFS)]
+    D --> E{Sqoop Success?}
+    
+    E -- No --> F[Retry / Wait Loop]
+    F --> E
+    E -- Still Fails --> G[Send Failure Email & Exit]
+    
+    E -- Yes --> H[Move Data to HDFS Archive Directory]
+    H --> I[Copy Files Locally & Upload via AzCopy to Azure]
+    
+    I --> J{File Transfer Success?}
+    J -- No --> K[Send Failure Email & Exit]
+    J -- Yes --> L[Send Success Email]
+    
+    L --> M[Trigger Next Pipeline Script: SyncCsoFulfillmentPipelineTrigger.sh]
+    M --> N[End]
