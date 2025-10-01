@@ -1,4 +1,5 @@
-flowchart TD
-
-  A[SCM20453<br/>Sqoop Ingestion<br/>Source DB → HDFS/Hive] --> B[SCM20455<br/>Hive Loads + Archive<br/>SHIPCAL_xxx + Archive flag]
-  B --> C[DMP Job<br/>Spark ETL Fulfillment Extraction<br/>HDFS/Hive → Azure Blob → CSO Pipeline]
+="SELECT '" & A2 & "' AS table_name,
+ COUNT(CASE WHEN YEAR(" & B2 & ") = 2023 THEN 1 END) AS count_2023,
+ COUNT(CASE WHEN YEAR(" & B2 & ") = 2024 THEN 1 END) AS count_2024,
+ COUNT(CASE WHEN YEAR(" & B2 & ") = 2025 THEN 1 END) AS count_2025
+FROM " & A2 & ";"
