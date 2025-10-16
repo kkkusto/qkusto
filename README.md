@@ -1,38 +1,43 @@
-SELECT COUNT(CASE WHEN order_date BETWEEN '2023-01-01' AND '2023-12-31' THEN 1 END) count_2023,
-       COUNT(CASE WHEN order_date BETWEEN '2024-01-01' AND '2024-12-31' THEN 1 END) count_2024,
-       COUNT(CASE WHEN order_date BETWEEN '2025-01-01' AND '2025-12-31' THEN 1 END) count_2025
-FROM customer_orders;
-
-
+import os
 import pandas as pd
+import plotly.express as px
 
-# Input Excel and output shell script
-excel_file = "input.xlsx"
-output_sh = "run_counts.sh"
+# --- Configuration ---
+input_folder = "path/to/your/folder"   # 🔸 change this to your folder path
+output_folder = input_folder           # save in same folder or set a new path
 
-# Read Excel
-df = pd.read_excel(excel_file)
+# --- Iterate over CSV files ---
+for file in os.listdir(input_folder):
+    if file.endswith(".csv"):
+        file_path = os.path.join(input_folder, file)
+        df = pd.read_csv(file_path)
 
-queries = []
+        # --- Expecting columns: Tool Name, App Count ---
+        if not {"Tool Name", "App Count"}.issubset(df.columns):
+            print(f"Skipping {file}: required columns missing.")
+            continue
 
-for _, row in df.iterrows():
-    if str(row["legacy system"]).strip().lower() == "hadoop":
-        table = row["TableName"]   # column C
-        date_col = row["DateColumn"]  # column K
+        # Create pivot table (Tool Name on Y-axis, single value heatmap)
+        # If multiple entries per tool, take mean or sum
+        data = df.groupby("Tool Name", as_index=False)["App Count"].sum()
 
-        query = f"""
-hive -e "SELECT COUNT(CASE WHEN YEAR({date_col}) = 2023 THEN 1 END) count_2023,
-               COUNT(CASE WHEN YEAR({date_col}) = 2024 THEN 1 END) count_2024,
-               COUNT(CASE WHEN YEAR({date_col}) = 2025 THEN 1 END) count_2025
-        FROM {table};" >> results.csv
-"""
-        queries.append(query)
+        # Create interactive heatmap
+        fig = px.imshow(
+            [data["App Count"].values],
+            labels=dict(x="Tool Name", color="App Count"),
+            x=data["Tool Name"],
+            color_continuous_scale="Viridis",
+            aspect="auto"
+        )
+        fig.update_layout(
+            title=f"Heatmap for {file}",
+            xaxis=dict(side="bottom"),
+            yaxis=dict(showticklabels=False),
+        )
 
-# Write shell script
-with open(output_sh, "w") as f:
-    f.write("#!/bin/bash\n")
-    f.write('echo "count_2023,count_2024,count_2025" > results.csv\n')
-    for q in queries:
-        f.write(q + "\n")
+        # --- Save as HTML ---
+        output_name = os.path.splitext(file)[0] + "_heatmap.html"
+        output_path = os.path.join(output_folder, output_name)
+        fig.write_html(output_path, include_plotlyjs="cdn", full_html=True)
 
-print(f"✅ Shell script created: {output_sh}")
+        print(f"✅ Saved heatmap: {output_path}")
