@@ -1,43 +1,67 @@
-import os
-import pandas as pd
-import plotly.express as px
+🔹 Artificial Intelligence / Machine Learning
 
-# --- Configuration ---
-input_folder = "path/to/your/folder"   # 🔸 change this to your folder path
-output_folder = input_folder           # save in same folder or set a new path
+Building and deploying LLM-based solutions (LangChain, LangGraph, memory-enabled agents, multi-agent orchestration).
 
-# --- Iterate over CSV files ---
-for file in os.listdir(input_folder):
-    if file.endswith(".csv"):
-        file_path = os.path.join(input_folder, file)
-        df = pd.read_csv(file_path)
+Developing NLP and transformer-based models for text understanding, classification, and extraction.
 
-        # --- Expecting columns: Tool Name, App Count ---
-        if not {"Tool Name", "App Count"}.issubset(df.columns):
-            print(f"Skipping {file}: required columns missing.")
-            continue
+Applying Generative AI for automation, diagnostics, and intelligent assistants.
 
-        # Create pivot table (Tool Name on Y-axis, single value heatmap)
-        # If multiple entries per tool, take mean or sum
-        data = df.groupby("Tool Name", as_index=False)["App Count"].sum()
+Fine-tuning and experimenting with open-source models (local LLMs, LoRA, custom pipelines).
 
-        # Create interactive heatmap
-        fig = px.imshow(
-            [data["App Count"].values],
-            labels=dict(x="Tool Name", color="App Count"),
-            x=data["Tool Name"],
-            color_continuous_scale="Viridis",
-            aspect="auto"
-        )
-        fig.update_layout(
-            title=f"Heatmap for {file}",
-            xaxis=dict(side="bottom"),
-            yaxis=dict(showticklabels=False),
-        )
+🔹 Python Automation & Scripting
 
-        # --- Save as HTML ---
-        output_name = os.path.splitext(file)[0] + "_heatmap.html"
-        output_path = os.path.join(output_folder, output_name)
-        fig.write_html(output_path, include_plotlyjs="cdn", full_html=True)
+Writing robust Python scripts for:
 
-        print(f"✅ Saved heatmap: {output_path}")
+Metadata extraction
+
+Lineage mapping
+
+Parameter extraction
+
+Table size analysis
+
+Validation & reconciliation
+
+Building reusable utilities with structured outputs (CSV, Excel, JSON, logs).
+
+🔹 Data Engineering & Big Data Platforms
+
+Hands-on with Databricks, Spark, Delta Lake.
+
+Designing ETL/ELT pipelines and migration frameworks.
+
+Working with Oracle, Teradata, Hadoop, HBase.
+
+Data retention, vacuum strategies, and lifecycle management.
+
+🔹 Automation-Driven Testing & Validation
+
+Creating automated data validation frameworks.
+
+Automating reconciliation between source and target systems.
+
+Designing checks for completeness, accuracy, duplicates, and schema drift.
+
+🔹 Performance & Scalability Mindset
+
+Understanding pipeline performance bottlenecks.
+
+Designing scripts and jobs with parallelism and efficiency in mind.
+
+Familiar with performance testing concepts and how to automate them.
+
+🔹 API & Backend Development
+
+Building REST APIs using FastAPI.
+
+Integrating external services and internal tools.
+
+Creating backend services for AI workflows.
+
+🔹 Cloud & DevOps Basics
+
+Azure fundamentals.
+
+CI/CD awareness.
+
+Config-driven pipelines using YAML / JSON / .env.
